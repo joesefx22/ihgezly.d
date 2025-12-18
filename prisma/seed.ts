@@ -4,10 +4,41 @@ import { hash } from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
+// Helper: generate time slots
+function generateSlots(opening: string, closing: string, durationMin: number) {
+  const slots = []
+  const [openH, openM] = opening.split(':').map(Number)
+  const [closeH, closeM] = closing.split(':').map(Number)
+
+  let start = new Date()
+  start.setHours(openH, openM, 0, 0)
+
+  let end = new Date()
+  end.setHours(closeH, closeM, 0, 0)
+
+  while (start < end) {
+    const slotStart = new Date(start)
+    const slotEnd = new Date(start.getTime() + durationMin * 60000)
+
+    if (slotEnd > end) break
+
+    slots.push({
+      startTime: slotStart,
+      endTime: slotEnd
+    })
+
+    start = slotEnd
+  }
+
+  return slots
+}
+
 async function main() {
-  // 1. إنشاء مستخدمين
+  console.log('🌱 Seeding database...')
+
+  // 1. Users
   const hashedPassword = await hash('password123', 12)
-  
+
   const player = await prisma.user.create({
     data: {
       name: 'محمد أحمد',
@@ -17,7 +48,7 @@ async function main() {
       phone: '01012345678'
     }
   })
-  
+
   const employee = await prisma.user.create({
     data: {
       name: 'أحمد موظف',
@@ -27,9 +58,18 @@ async function main() {
       phone: '01087654321'
     }
   })
-  
-  // 2. إنشاء ملاعب كرة قدم
-  const footballFields = await Promise.all([
+
+  const admin = await prisma.user.create({
+    data: {
+      name: 'Admin User',
+      email: 'admin@example.com',
+      passwordHash: hashedPassword,
+      role: 'ADMIN'
+    }
+  })
+
+  // 2. Fields
+  const fields = await Promise.all([
     prisma.field.create({
       data: {
         name: 'ملعب النصر الخماسي',
@@ -40,7 +80,7 @@ async function main() {
         depositPrice: 100,
         openingTime: '08:00',
         closingTime: '23:00',
-        slotDuration: 60,
+        slotDurationMin: 60,
         facilities: ['إضاءة ليلية', 'تغيير ملابس', 'باركينج', 'كافتيريا'],
         imageUrl: '/images/fields/football1.jpg'
       }
@@ -55,15 +95,11 @@ async function main() {
         depositPrice: 150,
         openingTime: '09:00',
         closingTime: '00:00',
-        slotDuration: 90,
+        slotDurationMin: 90,
         facilities: ['تغيير ملابس', 'دش', 'باركينج', 'إضاءة LED'],
         imageUrl: '/images/fields/football2.jpg'
       }
-    })
-  ])
-  
-  // 3. إنشاء ملاعب بادل
-  const padelFields = await Promise.all([
+    }),
     prisma.field.create({
       data: {
         name: 'نادي البادل الذهبي',
@@ -74,19 +110,72 @@ async function main() {
         depositPrice: 80,
         openingTime: '07:00',
         closingTime: '22:00',
-        slotDuration: 60,
+        slotDurationMin: 60,
         facilities: ['تكييف', 'كافتيريا', 'مدرب', 'معدات'],
         imageUrl: '/images/fields/padel1.jpg'
       }
     })
   ])
-  
-  console.log('✅ Seed data created successfully!')
+
+  // 3. Generate Slots for each field
+  for (const field of fields) {
+    const slots = generateSlots(field.openingTime, field.closingTime, field.slotDurationMin)
+
+    await prisma.slot.createMany({
+      data: slots.map(s => ({
+        fieldId: field.id,
+        startTime: s.startTime,
+        endTime: s.endTime
+      }))
+    })
+  }
+
+  // 4. Create a booking for testing
+  const firstField = fields[0]
+
+  const firstSlot = await prisma.slot.findFirst({
+    where: { fieldId: firstField.id }
+  })
+
+  if (firstSlot) {
+    const booking = await prisma.booking.create({
+      data: {
+        userId: player.id,
+        fieldId: firstField.id,
+        slotId: firstSlot.id,
+        status: 'CONFIRMED',
+        paymentStatus: 'PAID',
+        totalAmount: 300,
+        depositPaid: 100
+      }
+    })
+
+    await prisma.payment.create({
+      data: {
+        bookingId: booking.id,
+        amount: 300,
+        status: 'PAID',
+        currency: 'EGP'
+      }
+    })
+
+    await prisma.notification.create({
+      data: {
+        userId: player.id,
+        type: 'BOOKING_CONFIRMED',
+        title: 'تم تأكيد الحجز',
+        message: 'تم تأكيد حجزك في ملعب النصر الخماسي.',
+        relatedId: booking.id
+      }
+    })
+  }
+
+  console.log('✅ Database seeded successfully!')
 }
 
 main()
   .catch((e) => {
-    console.error('Error seeding database:', e)
+    console.error('❌ Error seeding database:', e)
     process.exit(1)
   })
   .finally(async () => {
