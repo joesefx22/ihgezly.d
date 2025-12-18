@@ -1,20 +1,19 @@
-// components/home/main-cards-grid.tsx
 'use client'
 
 import { useRouter } from 'next/navigation'
 import MainCard from './main-card'
 import { 
-  SoccerBall, 
-  TennisBall, 
-  CalendarCheck, 
-  PlusCircle 
+  Football,
+  Tennis,
+  CalendarCheck,
+  PlusCircle
 } from 'lucide-react'
 
 const cards = [
   {
     title: 'ملاعب كرة القدم',
     description: 'احجز أفضل ملاعب الكرة بأعلى جودة',
-    icon: SoccerBall,
+    icon: Football,
     color: 'bg-gradient-to-r from-sport-football to-green-600',
     href: '/fields?type=football',
     badge: '20+ ملعب'
@@ -22,7 +21,7 @@ const cards = [
   {
     title: 'ملاعب البادل',
     description: 'استمتع بأحدث ملاعب البادل',
-    icon: TennisBall,
+    icon: Tennis,
     color: 'bg-gradient-to-r from-sport-padel to-blue-600',
     href: '/fields?type=padel',
     badge: '15+ ملعب'
@@ -62,7 +61,7 @@ export default function MainCardsGrid() {
         <div 
           key={index}
           onClick={() => handleClick(card.href, card.external)}
-          className="cursor-pointer transform transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl"
+          className="group cursor-pointer transform transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl"
         >
           <MainCard {...card} />
         </div>
