@@ -1,4 +1,3 @@
-// package.json
 {
   "name": "sport-fields-booking",
   "version": "1.0.0",
@@ -13,10 +12,10 @@
     "db:seed": "npx tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.7.0",
+    "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "date-fns": "^3.0.0",
-    "date-fns-tz": "^2.0.0",
+    "date-fns-tz": "^3.2.0",
     "lucide-react": "^0.309.0",
     "next": "14.0.4",
     "next-auth": "^4.24.5",
