@@ -2,18 +2,11 @@
 
 import { useRouter } from 'next/navigation'
 import MainCard from './main-card'
-import { 
-  Football,
-  Tennis,
-  CalendarCheck,
-  PlusCircle
-} from 'lucide-react'
 
 const cards = [
   {
     title: 'ملاعب كرة القدم',
     description: 'احجز أفضل ملاعب الكرة بأعلى جودة',
-    icon: Football,
     color: 'bg-gradient-to-r from-sport-football to-green-600',
     href: '/fields?type=football',
     badge: '20+ ملعب'
@@ -21,7 +14,6 @@ const cards = [
   {
     title: 'ملاعب البادل',
     description: 'استمتع بأحدث ملاعب البادل',
-    icon: Tennis,
     color: 'bg-gradient-to-r from-sport-padel to-blue-600',
     href: '/fields?type=padel',
     badge: '15+ ملعب'
@@ -29,7 +21,6 @@ const cards = [
   {
     title: 'حجوزاتي',
     description: 'تابع جميع حجوزاتك القادمة',
-    icon: CalendarCheck,
     color: 'bg-gradient-to-r from-purple-500 to-purple-700',
     href: '/bookings',
     badge: 'متابعة'
@@ -37,7 +28,6 @@ const cards = [
   {
     title: 'إضافة ملعب جديد',
     description: 'هل لديك ملعب؟ أضفه إلى المنصة',
-    icon: PlusCircle,
     color: 'bg-gradient-to-r from-amber-500 to-orange-600',
     href: 'https://forms.google.com/...',
     external: true

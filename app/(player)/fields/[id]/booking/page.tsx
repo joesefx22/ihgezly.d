@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import DaySelector from '@/components/booking/day-selector'
 import SlotGrid from '@/components/booking/slot-grid'
 import { Loader2, ArrowRight, MapPin, CreditCard } from 'lucide-react'
-import { generateNextTenDays } from '@/lib/time-slots/core-logic'
+import { generateNextTenDays, Day } from '@/lib/time-slots/core-logic'
 
 interface Field {
   id: string
@@ -25,9 +25,9 @@ export default function FieldBookingPage() {
   
   const [field, setField] = useState<Field | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
-  const [slots, setSlots] = useState([])
-  const [days, setDays] = useState<any[]>([])
+  const [selectedDay, setSelectedDay] = useState<Day | null>(null)
+  const [slots, setSlots] = useState<any[]>([])
+  const [days, setDays] = useState<Day[]>([])
 
   useEffect(() => {
     fetchField()
@@ -36,15 +36,15 @@ export default function FieldBookingPage() {
     setDays(nextTenDays)
     // اختيار اليوم الأول تلقائياً
     if (nextTenDays.length > 0) {
-      setSelectedDate(nextTenDays[0].date)
+      setSelectedDay(nextTenDays[0])
     }
   }, [])
 
   useEffect(() => {
-    if (selectedDate && fieldId) {
-      fetchSlots(selectedDate)
+    if (selectedDay && fieldId) {
+      fetchSlots(selectedDay.date)
     }
-  }, [selectedDate, fieldId])
+  }, [selectedDay, fieldId])
 
   const fetchField = async () => {
     try {
@@ -68,8 +68,8 @@ export default function FieldBookingPage() {
     }
   }
 
-  const handleSelectDate = (date: Date) => {
-    setSelectedDate(date)
+  const handleSelectDate = (day: Day) => {
+    setSelectedDay(day)
   }
 
   if (loading) {
@@ -137,14 +137,14 @@ export default function FieldBookingPage() {
       {/* Day Selector */}
       <DaySelector
         days={days}
-        selectedDate={selectedDate}
+        selectedDate={selectedDay}
         onSelectDate={handleSelectDate}
       />
 
       {/* Slots Grid */}
       <div className="mb-8">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          المواعيد المتاحة {selectedDate && `ليوم ${selectedDate.toLocaleDateString('ar-EG')}`}
+          المواعيد المتاحة {selectedDay && `ليوم ${selectedDay.date.toLocaleDateString('ar-EG')}`}
         </h3>
         
         {slots.length === 0 ? (

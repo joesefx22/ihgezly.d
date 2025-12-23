@@ -22,6 +22,17 @@ const CONFIRMATION_WINDOW_HOURS = 24
 const LOCK_DURATION_MINUTES = 5
 
 // ================================
+// TYPES
+// ================================
+
+export interface Day {
+  date: Date
+  label: string
+  isToday: boolean
+  isTomorrow: boolean
+}
+
+// ================================
 // HELPERS
 // ================================
 
@@ -135,9 +146,9 @@ export async function generateSlotsForDay({
 
   const slots: any[] = []
 
-  while (addMinutes(current, field.slotDuration) <= end) {
+  while (addMinutes(current, field.slotDurationMin) <= end) {
     const slotStart = new Date(current)
-    const slotEnd = addMinutes(slotStart, field.slotDuration)
+    const slotEnd = addMinutes(slotStart, field.slotDurationMin)
 
     const key = normalizeToMinute(slotStart)
     const dbSlot = slotsMap.get(key)
@@ -219,10 +230,10 @@ export async function lockSlot({
 
     if (
       !slot ||
-      ![
-        SLOT_STATUS.AVAILABLE,
-        SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
-      ].includes(slot.status)
+      !(
+        slot.status === SLOT_STATUS.AVAILABLE ||
+        slot.status === SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
+      )
     ) {
       throw new Error('Slot not available')
     }
@@ -230,11 +241,32 @@ export async function lockSlot({
     await tx.slot.update({
       where: { id: slotId },
       data: {
-        status: SLOT_STATUS.TEMP_LOCKED,
+        status: SLOT_STATUS.TEMP_LOCKED as any, // cast to satisfy TS
         lockedUntil: addMinutes(now, LOCK_DURATION_MINUTES)
       }
     })
 
     return { success: true }
   })
+}
+
+// ================================
+// GENERATE NEXT TEN DAYS
+// ================================
+
+export function generateNextTenDays(): Day[] {
+  const days: Day[] = []
+  const today = startOfDay(new Date())
+
+  for (let i = 0; i < 10; i++) {
+    const date = addDays(today, i)
+    days.push({
+      date,
+      label: date.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' }),
+      isToday: i === 0,
+      isTomorrow: i === 1
+    })
+  }
+
+  return days
 }

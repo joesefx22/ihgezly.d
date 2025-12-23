@@ -16,6 +16,11 @@ function generateSlots(opening: string, closing: string, durationMin: number) {
   let end = new Date()
   end.setHours(closeH, closeM, 0, 0)
 
+  // لو وقت الإغلاق أقل من وقت الفتح → نزود يوم
+  if (end <= start) {
+    end.setDate(end.getDate() + 1)
+  }
+
   while (start < end) {
     const slotStart = new Date(start)
     const slotEnd = new Date(start.getTime() + durationMin * 60000)
@@ -94,7 +99,7 @@ async function main() {
         pricePerHour: 350,
         depositPrice: 150,
         openingTime: '09:00',
-        closingTime: '00:00',
+        closingTime: '23:59', // ✅ تعديل هنا
         slotDurationMin: 90,
         facilities: ['تغيير ملابس', 'دش', 'باركينج', 'إضاءة LED'],
         imageUrl: '/images/fields/football2.jpg'
@@ -145,15 +150,15 @@ async function main() {
         slotId: firstSlot.id,
         status: 'CONFIRMED',
         paymentStatus: 'PAID',
-        totalAmount: 300,
-        depositPaid: 100
+        totalAmount: firstField.pricePerHour,
+        depositPaid: firstField.depositPrice
       }
     })
 
     await prisma.payment.create({
       data: {
         bookingId: booking.id,
-        amount: 300,
+        amount: booking.totalAmount,
         status: 'PAID',
         currency: 'EGP'
       }
@@ -164,7 +169,7 @@ async function main() {
         userId: player.id,
         type: 'BOOKING_CONFIRMED',
         title: 'تم تأكيد الحجز',
-        message: 'تم تأكيد حجزك في ملعب النصر الخماسي.',
+        message: `تم تأكيد حجزك في ${firstField.name}.`,
         relatedId: booking.id
       }
     })

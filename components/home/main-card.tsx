@@ -1,22 +1,16 @@
 // components/home/main-card.tsx
+
 interface MainCardProps {
   title: string
   description: string
-  icon: React.ComponentType<{ className?: string }>
   color: string
   badge?: string
   external?: boolean
 }
 
-export default function MainCard({ title, description, icon: Icon, color, badge, external }: MainCardProps) {
+export default function MainCard({ title, description, color, badge, external }: MainCardProps) {
   return (
     <div className={`relative overflow-hidden rounded-2xl p-6 h-full ${color} text-white`}>
-      {/* Icon */}
-      <div className="mb-6">
-        <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
-          <Icon className="w-8 h-8" />
-        </div>
-      </div>
 
       {/* Content */}
       <h3 className="text-xl font-bold mb-2">{title}</h3>
