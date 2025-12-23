@@ -13,8 +13,8 @@ interface Day {
 
 interface DaySelectorProps {
   days: Day[]
-  selectedDate: Date | null
-  onSelectDate: (date: Date) => void
+  selectedDate: Day | null
+  onSelectDate: (day: Day) => void
 }
 
 export default function DaySelector({ days, selectedDate, onSelectDate }: DaySelectorProps) {
@@ -57,9 +57,9 @@ export default function DaySelector({ days, selectedDate, onSelectDate }: DaySel
           {days.map((day, index) => (
             <button
               key={index}
-              onClick={() => onSelectDate(day.date)}
+              onClick={() => onSelectDate(day)}
               className={`flex-shrink-0 w-28 rounded-xl p-4 text-center transition-all ${
-                selectedDate?.toDateString() === day.date.toDateString()
+                selectedDate?.date.toDateString() === day.date.toDateString()
                   ? 'bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg scale-105'
                   : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
               }`}

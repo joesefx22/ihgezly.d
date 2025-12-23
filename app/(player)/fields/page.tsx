@@ -48,13 +48,21 @@ export default function FieldsPage() {
     try {
       const response = await fetch(`/api/fields?type=${type}`)
       const data = await response.json()
-      setFields(data.fields)
-      
-      // استخراج المناطق الفريدة
-      const uniqueLocations = [...new Set(data.fields.map((f: Field) => f.location))]
+
+      // تأكد إن البيانات Array قبل التخزين
+      setFields(Array.isArray(data.fields) ? data.fields : [])
+
+      // استخراج المناطق الفريدة مع النوع الصحيح
+      const uniqueLocations: string[] = Array.from(
+        new Set<string>(
+          Array.isArray(data.fields) ? data.fields.map((f: Field) => f.location) : []
+        )
+      )
       setLocations(uniqueLocations)
     } catch (error) {
       console.error('Error fetching fields:', error)
+      setFields([])
+      setLocations([])
     } finally {
       setLoading(false)
     }
@@ -95,7 +103,7 @@ export default function FieldsPage() {
       )}
 
       {/* Fields Grid */}
-      {filteredFields.length === 0 ? (
+      {!Array.isArray(filteredFields) || filteredFields.length === 0 ? (
         <div className="text-center py-16 bg-gray-50 rounded-2xl">
           <Filter className="w-16 h-16 text-gray-400 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-gray-700 mb-2">لا توجد ملاعب</h3>

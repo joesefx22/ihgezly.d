@@ -5,11 +5,12 @@ import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
 import { canBookDirectly } from '@/lib/time-slots/core-logic'
 import { checkBookingLimits } from '@/lib/time-slots/booking-limits'
+import { SLOT_STATUS, BOOKING_STATUS, PAYMENT_STATUS } from '@/lib/constants'
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const session = await getServerSession(authOptions)
-    
+
     if (!session) {
       return NextResponse.json(
         { error: 'غير مصرح' },
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
         userId: session.user.id,
         slot: {
           startTime: {
-            gte: new Date() // الحجوزات المستقبلية فقط
+            gte: new Date()
           }
         }
       },
@@ -31,9 +32,7 @@ export async function GET(request: NextRequest) {
         slot: true
       },
       orderBy: {
-        slot: {
-          startTime: 'asc'
-        }
+        slot: { startTime: 'asc' }
       }
     })
 
@@ -50,7 +49,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
+
     if (!session) {
       return NextResponse.json(
         { error: 'يجب تسجيل الدخول أولاً' },
@@ -58,65 +57,68 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
-    const { slotId, fieldId, startTime } = body
+    const { slotId, fieldId, startTime } = await request.json()
 
-    // التحقق من حدود الحجز
+    if (!slotId || !fieldId || !startTime) {
+      return NextResponse.json(
+        { error: 'بيانات الحجز غير مكتملة' },
+        { status: 400 }
+      )
+    }
+
     await checkBookingLimits({
       userId: session.user.id,
       slotDate: new Date(startTime)
     })
 
-    // البحث عن الـ slot
     const slot = await prisma.slot.findUnique({
       where: { id: slotId },
       include: { field: true }
     })
 
-    if (!slot) {
+    if (!slot || slot.fieldId !== fieldId) {
       return NextResponse.json(
-        { error: 'الموعد غير موجود' },
+        { error: 'الموعد غير صالح' },
         { status: 404 }
       )
     }
 
-    if (slot.status !== 'AVAILABLE' && slot.status !== 'NEED_CONFIRMATION') {
+    if (
+      slot.status !== SLOT_STATUS.AVAILABLE &&
+      slot.status !== SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
+    ) {
       return NextResponse.json(
         { error: 'الموعد غير متاح للحجز' },
         { status: 400 }
       )
     }
 
-    // تحديد حالة الحجز بناءً على الوقت
     const needsConfirmation = !canBookDirectly(new Date(startTime))
-    
-    let bookingStatus = 'CONFIRMED'
-    let slotStatus = 'BOOKED'
-    
-    if (needsConfirmation) {
-      bookingStatus = 'PENDING_CONFIRMATION'
-      slotStatus = 'NEED_CONFIRMATION'
-    }
 
-    // إنشاء الحجز
+    const bookingStatus = needsConfirmation
+      ? BOOKING_STATUS.PENDING_CONFIRMATION
+      : BOOKING_STATUS.CONFIRMED
+
+    const newSlotStatus = needsConfirmation
+      ? SLOT_STATUS.PENDING_CONFIRMATION
+      : SLOT_STATUS.BOOKED
+
     const booking = await prisma.$transaction(async (tx) => {
-      // تحديث حالة الـ slot
       await tx.slot.update({
         where: { id: slotId },
-        data: { status: slotStatus }
+        data: { status: newSlotStatus as any }
       })
 
-      // إنشاء الحجز
-      return await tx.booking.create({
+      return tx.booking.create({
         data: {
           userId: session.user.id,
           fieldId,
           slotId,
-          status: bookingStatus,
-          paymentStatus: needsConfirmation ? 'PENDING' : 'PENDING',
+          status: bookingStatus as any,
+          paymentStatus: PAYMENT_STATUS.PENDING,
           totalAmount: slot.field.pricePerHour,
           depositPaid: 0,
-          refundableUntil: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 ساعة
+          refundableUntil: new Date(Date.now() + 24 * 60 * 60 * 1000)
         },
         include: {
           field: true,
@@ -128,22 +130,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       booking,
       needsPayment: !needsConfirmation,
-      message: needsConfirmation 
-        ? 'تم تقديم طلب الحجز بنجاح، سيتم تأكيده من قبل الموظف'
-        : 'تم حجز الموعد بنجاح، يرجى إكمال عملية الدفع'
+      message: needsConfirmation
+        ? 'تم إرسال طلب الحجز وسيتم تأكيده من قبل الموظف'
+        : 'تم حجز الموعد بنجاح، يرجى إتمام الدفع'
     })
   } catch (error: any) {
     console.error('Error creating booking:', error)
-    
-    if (error.message.includes('booking limit')) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 400 }
-      )
-    }
-    
+
     return NextResponse.json(
-      { error: 'فشل في إنشاء الحجز' },
+      { error: error.message || 'فشل في إنشاء الحجز' },
       { status: 500 }
     )
   }
