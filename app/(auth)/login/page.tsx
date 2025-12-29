@@ -2,138 +2,195 @@
 'use client'
 
 import { useState } from 'react'
-import { signIn } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { loginSchema, LoginInput } from '@/lib/auth/validators'
+import { useAuth } from '@/context/authcontext'
+import { 
+  LogIn, 
+  Mail, 
+  Lock, 
+  Shield,
+  Gamepad2
+} from 'lucide-react'
+import Button from '@/components/ui/button'
+import Input from '@/components/ui/input'
+import Card from '@/components/ui/card'
+import Alert from '@/components/ui/alert'
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [showPassword, setShowPassword] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const { login, isAuthenticated } = useAuth()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   
-  const [formData, setFormData] = useState({
-    email: '',
-    password: ''
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: '',
+      password: ''
+    }
   })
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
+  // Redirect if already authenticated
+  if (isAuthenticated) {
+    router.push('/dashboard')
+    return null
+  }
+
+  const onSubmit = async (data: LoginInput) => {
+    setIsLoading(true)
     setError('')
-
+    
     try {
-      const result = await signIn('credentials', {
-        email: formData.email,
-        password: formData.password,
-        redirect: false
-      })
-
-      if (result?.error) {
-        setError('البريد الإلكتروني أو كلمة المرور غير صحيحة')
-      } else {
-        router.push('/')
-        router.refresh()
-      }
-    } catch (error) {
-      setError('حدث خطأ أثناء تسجيل الدخول')
+      await login(data.email, data.password)
+    } catch (err: any) {
+      setError(err.message || 'فشل تسجيل الدخول')
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
+  const redirect = searchParams.get('redirect')
+  const registered = searchParams.get('registered')
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
         {/* Header */}
-        <div className="p-8 text-center border-b border-gray-200">
-          <div className="w-16 h-16 bg-gradient-to-r from-primary-500 to-primary-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-white text-2xl">⚽</span>
+        <div className="text-center mb-8">
+          <div className="inline-block p-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl mb-4">
+            <Gamepad2 className="w-12 h-12 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">تسجيل الدخول</h1>
-          <p className="text-gray-600 mt-2">أدخل بياناتك للوصول إلى حسابك</p>
+          <h1 className="text-4xl font-bold text-white mb-2">مرحباً بعودتك!</h1>
+          <p className="text-gray-300">سجل دخولك وابدأ رحلتك</p>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-8">
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
-              <div className="flex items-center gap-2 text-red-700">
-                <AlertCircle className="w-5 h-5" />
-                <span className="font-medium">{error}</span>
-              </div>
-            </div>
+        <Card className="p-8 bg-white/10 backdrop-blur-lg border border-white/20">
+          {registered && (
+            <Alert 
+              type="success" 
+              title="تم التسجيل بنجاح" 
+              message="تم إنشاء حسابك، يمكنك تسجيل الدخول الآن" 
+              className="mb-6"
+            />
           )}
 
-          {/* Email */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              البريد الإلكتروني
-            </label>
+          {redirect && (
+            <Alert 
+              type="info" 
+              title="مطلوب تسجيل دخول" 
+              message="يجب تسجيل الدخول للوصول إلى هذه الصفحة" 
+              className="mb-6"
+            />
+          )}
+
+          {error && (
+            <Alert 
+              type="error" 
+              title="فشل تسجيل الدخول" 
+              message={error} 
+              className="mb-6"
+            />
+          )}
+
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             <div className="relative">
-              <Mail className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
+              <div className="absolute right-3 top-3 text-gray-400">
+                <Mail className="w-5 h-5" />
+              </div>
+              <Input
+                label="البريد الإلكتروني"
                 type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
-                className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                placeholder="example@email.com"
-                required
+                placeholder="you@example.com"
+                error={errors.email?.message}
+                {...register('email')}
+                disabled={isLoading}
+                className="bg-white/5 border-white/20 text-white pr-10"
               />
             </div>
-          </div>
 
-          {/* Password */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              كلمة المرور
-            </label>
             <div className="relative">
-              <Lock className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={formData.password}
-                onChange={(e) => setFormData({...formData, password: e.target.value})}
-                className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              <div className="absolute right-3 top-3 text-gray-400">
+                <Lock className="w-5 h-5" />
+              </div>
+              <Input
+                label="كلمة المرور"
+                type="password"
                 placeholder="••••••••"
-                required
+                error={errors.password?.message}
+                {...register('password')}
+                disabled={isLoading}
+                className="bg-white/5 border-white/20 text-white pr-10"
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
             </div>
-          </div>
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 px-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-bold hover:from-primary-600 hover:to-primary-700 transition-all disabled:opacity-50"
-          >
-            {loading ? 'جاري تسجيل الدخول...' : 'تسجيل الدخول'}
-          </button>
+            <Button
+              type="submit"
+              className="w-full py-4 bg-gradient-to-r from-blue-500 to-purple-500
+                       hover:from-blue-600 hover:to-purple-600 text-white font-semibold
+                       rounded-xl shadow-lg hover:shadow-xl transition-all duration-300
+                       flex items-center justify-center gap-2"
+              loading={isLoading}
+              disabled={isLoading}
+            >
+              {isLoading ? 'جاري تسجيل الدخول...' : (
+                <>
+                  <LogIn className="w-5 h-5" />
+                  تسجيل الدخول
+                </>
+              )}
+            </Button>
+          </form>
 
-          {/* Links */}
-          <div className="mt-6 text-center space-y-3">
-            <div>
-              <span className="text-gray-600">ليس لديك حساب؟ </span>
-              <Link href="/register" className="text-primary-600 font-medium hover:text-primary-700">
+          <div className="mt-8 pt-6 border-t border-white/20">
+            <p className="text-center text-gray-300 text-sm mb-4">
+              ليس لديك حساب؟{' '}
+              <Link
+                href="/register"
+                className="font-medium text-blue-400 hover:text-blue-300 underline"
+              >
                 إنشاء حساب جديد
               </Link>
-            </div>
-            
-            <div>
-              <Link href="/forgot-password" className="text-gray-500 hover:text-gray-700 text-sm">
-                نسيت كلمة المرور؟
-              </Link>
-            </div>
+            </p>
           </div>
-        </form>
+
+          {/* Roles Info */}
+          <div className="mt-8 p-4 bg-white/5 rounded-xl">
+            <h4 className="text-sm font-medium text-white mb-3 text-center">
+              <Shield className="w-4 h-4 inline ml-1" />
+              الأدوار المتاحة
+            </h4>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="text-center p-2 bg-blue-500/20 rounded-lg">
+                <div className="text-lg">🎮</div>
+                <div className="text-xs text-blue-300 font-medium">لاعب</div>
+              </div>
+              <div className="text-center p-2 bg-green-500/20 rounded-lg">
+                <div className="text-lg">🏟️</div>
+                <div className="text-xs text-green-300 font-medium">مالك</div>
+              </div>
+              <div className="text-center p-2 bg-purple-500/20 rounded-lg">
+                <div className="text-lg">👨‍💼</div>
+                <div className="text-xs text-purple-300 font-medium">موظف</div>
+              </div>
+              <div className="text-center p-2 bg-orange-500/20 rounded-lg">
+                <div className="text-lg">👑</div>
+                <div className="text-xs text-orange-300 font-medium">مدير</div>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 text-center mt-2">
+              يتم تحديد دورك تلقائياً بعد التسجيل
+            </p>
+          </div>
+        </Card>
       </div>
     </div>
   )

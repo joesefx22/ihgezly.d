@@ -1,21 +1,17 @@
-import {
-  addMinutes,
-  startOfDay,
-  addDays
-} from 'date-fns'
+import { addMinutes, startOfDay, addDays } from 'date-fns'
 import { prisma } from '@/lib/prisma'
 
 // ================================
-// CONSTANTS
+// CONSTANTS (keep legacy + UI states as-is)
 // ================================
 
 export const SLOT_STATUS = Object.freeze({
   AVAILABLE: 'AVAILABLE',
-  AVAILABLE_NEEDS_CONFIRM: 'AVAILABLE_NEEDS_CONFIRM',
+  AVAILABLE_NEEDS_CONFIRM: 'AVAILABLE_NEEDS_CONFIRM', // legacy/UI name for "needs manual confirmation"
   TEMP_LOCKED: 'TEMP_LOCKED',
   BOOKED: 'BOOKED',
-  PENDING_CONFIRMATION: 'PENDING_CONFIRMATION',
-  UNAVAILABLE: 'UNAVAILABLE'
+  PENDING_CONFIRMATION: 'PENDING_CONFIRMATION',       // legacy/UI name for "needs manual confirmation"
+  UNAVAILABLE: 'UNAVAILABLE'                          // UI-only for closed fields
 })
 
 const CONFIRMATION_WINDOW_HOURS = 24
@@ -28,6 +24,9 @@ const LOCK_DURATION_MINUTES = 5
 export interface Day {
   date: Date
   label: string
+  weekday: string
+  dayNumber: string
+  monthName: string
   isToday: boolean
   isTomorrow: boolean
 }
@@ -36,14 +35,33 @@ export interface Day {
 // HELPERS
 // ================================
 
-// Normalize to minute to avoid ms bugs
 function normalizeToMinute(date: Date): number {
   return Math.floor(date.getTime() / 60000) * 60000
 }
 
-// ================================
-// STATUS RESOLVER
-// ================================
+export function canBookDirectly(start: Date): boolean {
+  const diffMs = start.getTime() - Date.now()
+  const diffHours = diffMs / (1000 * 60 * 60)
+  return diffHours >= CONFIRMATION_WINDOW_HOURS
+}
+
+function normalizeDbStatus(
+  status: string | null | undefined
+): typeof SLOT_STATUS[keyof typeof SLOT_STATUS] | null {
+  if (!status) return null
+  switch (status) {
+    case SLOT_STATUS.AVAILABLE:
+    case SLOT_STATUS.TEMP_LOCKED:
+    case SLOT_STATUS.BOOKED:
+    case SLOT_STATUS.UNAVAILABLE:
+      return status
+    case SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM:
+    case SLOT_STATUS.PENDING_CONFIRMATION:
+      return SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
+    default:
+      return null
+  }
+}
 
 function resolveSlotStatus({
   field,
@@ -55,37 +73,40 @@ function resolveSlotStatus({
   slotStart: Date
   dbSlot?: any
   now: Date
-}): string | null {
+}): typeof SLOT_STATUS[keyof typeof SLOT_STATUS] | null {
   const diffMs = slotStart.getTime() - now.getTime()
   const diffHours = diffMs / (1000 * 60 * 60)
 
-  // Past slot
   if (diffHours < 0) return null
 
-  // Field closed (but keep existing bookings visible)
   if (field.status !== 'OPEN' && !dbSlot) {
     return SLOT_STATUS.UNAVAILABLE
   }
 
   if (dbSlot) {
+    const dbStatus = normalizeDbStatus(dbSlot.status)
+
     if (
-      dbSlot.status === SLOT_STATUS.TEMP_LOCKED &&
+      dbStatus === SLOT_STATUS.TEMP_LOCKED &&
       dbSlot.lockedUntil &&
       new Date(dbSlot.lockedUntil) > now
     ) {
       return SLOT_STATUS.TEMP_LOCKED
     }
 
-    if (dbSlot.status === SLOT_STATUS.BOOKED) {
+    if (dbStatus === SLOT_STATUS.BOOKED) {
       return SLOT_STATUS.BOOKED
     }
 
-    if (dbSlot.status === SLOT_STATUS.PENDING_CONFIRMATION) {
-      return SLOT_STATUS.PENDING_CONFIRMATION
+    if (dbStatus === SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM) {
+      return SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
+    }
+
+    if (dbStatus === SLOT_STATUS.UNAVAILABLE) {
+      return SLOT_STATUS.UNAVAILABLE
     }
   }
 
-  // Time-based rule
   if (diffHours < CONFIRMATION_WINDOW_HOURS) {
     return SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
   }
@@ -114,7 +135,6 @@ export async function generateSlotsForDay({
     throw new Error('Field not found')
   }
 
-  // Fetch all slots for that day in one query
   const dayStart = startOfDay(date)
   const dayEnd = addDays(dayStart, 1)
 
@@ -228,20 +248,23 @@ export async function lockSlot({
       where: { id: slotId }
     })
 
-    if (
-      !slot ||
-      !(
-        slot.status === SLOT_STATUS.AVAILABLE ||
-        slot.status === SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
-      )
-    ) {
+    if (!slot) {
+      throw new Error('Slot not available')
+    }
+
+    const status = normalizeDbStatus(slot.status)
+    const canLock =
+      status === SLOT_STATUS.AVAILABLE ||
+      status === SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
+
+    if (!canLock) {
       throw new Error('Slot not available')
     }
 
     await tx.slot.update({
       where: { id: slotId },
       data: {
-        status: SLOT_STATUS.TEMP_LOCKED as any, // cast to satisfy TS
+        status: SLOT_STATUS.TEMP_LOCKED as any,
         lockedUntil: addMinutes(now, LOCK_DURATION_MINUTES)
       }
     })
@@ -251,22 +274,35 @@ export async function lockSlot({
 }
 
 // ================================
-// GENERATE NEXT TEN DAYS
+// GENERATE NEXT DAYS (flexible + alias)
 // ================================
 
-export function generateNextTenDays(): Day[] {
+export function generateNextDays(count: number = 10): Day[] {
   const days: Day[] = []
   const today = startOfDay(new Date())
 
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < count; i++) {
     const date = addDays(today, i)
+
+    const weekday = date.toLocaleDateString('ar-EG', { weekday: 'long' })
+    const dayNumber = date.toLocaleDateString('ar-EG', { day: 'numeric' })
+    const monthName = date.toLocaleDateString('ar-EG', { month: 'long' })
+
     days.push({
       date,
-      label: date.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' }),
+      label: `${weekday}، ${dayNumber} ${monthName}`,
+      weekday,
+      dayNumber,
+      monthName,
       isToday: i === 0,
       isTomorrow: i === 1
     })
   }
 
   return days
+}
+
+// ✅ Alias للحفاظ على التوافق مع الملفات القديمة
+export function generateNextTenDays(): Day[] {
+  return generateNextDays(10)
 }
