@@ -1,7 +1,7 @@
 // app/api/fields/[id]/slots/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { generateDailySlots } from '@/lib/time-slots/core-logic'
+import { generateSlotsForDay } from '@/lib/time-slots/core-logic'
 import { FIELD_STATUS } from '@/lib/constants'
 
 export async function GET(
@@ -51,7 +51,11 @@ export async function GET(
       return NextResponse.json({ slots: [] }, { status: 200 })
     }
 
-    const slots = await generateDailySlots(fieldId, date)
+    const slots = await generateSlotsForDay({
+      fieldId,
+      date,
+      now: new Date()
+    })
 
     // ✅ فلترة الـ UNAVAILABLE
     const visibleSlots = Array.isArray(slots)

@@ -1,13 +1,14 @@
 // app/api/payments/create/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
+import { getServerSession } from 'next-auth/next'
 import { prisma } from '@/lib/prisma'
 import { paymob } from '@/lib/paymob'
-import { authOptions } from '@/lib/auth'
+import { authOptions } from '@/lib/auth/index'
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
+    // ✅ Cast to any لتفادي مشكلة TypeScript
+    const session = (await getServerSession(authOptions)) as any
     
     if (!session) {
       return NextResponse.json(
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
       apartment: "NA",
       email: session.user.email,
       floor: "NA",
-      first_name: session.user.name.split(' ')[0] || 'عميل',
+      first_name: session.user.name?.split(' ')[0] || 'عميل',
       street: "NA",
       building: "NA",
       phone_number: booking.user.phone || "01000000000",
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
       postal_code: "NA",
       city: "NA",
       country: "EG",
-      last_name: session.user.name.split(' ').slice(1).join(' ') || 'كريم',
+      last_name: session.user.name?.split(' ').slice(1).join(' ') || 'كريم',
       state: "NA"
     }
 

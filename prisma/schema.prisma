@@ -1,4 +1,3 @@
-// prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,11 +7,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ===================== ENUMS =====================
-enum UserRole {
+//////////////////// ENUMS ////////////////////
+
+enum Role {
   PLAYER
+  OWNER
   EMPLOYEE
   ADMIN
+}
+
+enum SkillLevel {
+  WEAK
+  AVERAGE
+  GOOD
+  EXCELLENT
+  LEGENDARY
 }
 
 enum FieldType {
@@ -49,29 +58,48 @@ enum PaymentStatus {
   PARTIALLY_REFUNDED
 }
 
-// ===================== MODELS =====================
+//////////////////// USER ////////////////////
+
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
   passwordHash String
-  role         UserRole @default(PLAYER)
 
-  phone  String?
-  avatar String?
+  phoneNumber String?  @unique
+  age         Int?
+  avatar      String?
+  description String?
+  skillLevel  SkillLevel @default(AVERAGE)
 
+  role        Role @default(PLAYER)
+
+  // 🔐 Auth & Security
+  isVerified    Boolean   @default(true)
+  isActive      Boolean   @default(true)
+  loginAttempts Int       @default(0)
+  lockedUntil   DateTime?
+  lastLogin     DateTime?
+
+  // 🔗 Relations
   bookings      Booking[]
+  slotsLocked   Slot[]        @relation("SlotLockedByUser")
   notifications Notification[]
   flags         FlaggedUser[]
+  auditLogs     AuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([email])
+  @@index([role])
+  @@index([createdAt])
 }
 
+//////////////////// FIELD ////////////////////
+
 model Field {
-  id          String  @id @default(cuid())
+  id          String @id @default(cuid())
   name        String
   description String?
   location    String
@@ -80,12 +108,11 @@ model Field {
   type     FieldType
   imageUrl String?
 
-  pricePerHour Float
-  depositPrice Float
-
-  openingTime     String
-  closingTime     String
-  slotDurationMin Int    @default(60)
+  pricePerHour   Float
+  depositPrice   Float
+  openingTime    String
+  closingTime    String
+  slotDurationMin Int @default(60)
 
   status     FieldStatus @default(OPEN)
   facilities String[]
@@ -100,6 +127,8 @@ model Field {
   @@index([location])
 }
 
+//////////////////// SLOT ////////////////////
+
 model Slot {
   id      String @id @default(cuid())
   fieldId String
@@ -111,27 +140,32 @@ model Slot {
   status      SlotStatus @default(AVAILABLE)
   lockedUntil DateTime?
 
+  lockedByUserId String?
+  lockedByUser   User? @relation("SlotLockedByUser", fields: [lockedByUserId], references: [id])
+
   booking Booking?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([fieldId, startTime])
-  @@index([fieldId, startTime, status])
   @@index([status, lockedUntil])
+  @@index([lockedByUserId])
 }
+
+//////////////////// BOOKING ////////////////////
 
 model Booking {
   id String @id @default(cuid())
 
   userId String
-  user   User   @relation(fields: [userId], references: [id])
+  user   User @relation(fields: [userId], references: [id])
 
   fieldId String
-  field   Field  @relation(fields: [fieldId], references: [id])
+  field   Field @relation(fields: [fieldId], references: [id])
 
   slotId String @unique
-  slot   Slot   @relation(fields: [slotId], references: [id])
+  slot   Slot @relation(fields: [slotId], references: [id])
 
   status        BookingStatus
   paymentStatus PaymentStatus @default(PENDING)
@@ -155,8 +189,9 @@ model Booking {
   @@index([userId])
   @@index([fieldId])
   @@index([status])
-  @@index([createdAt])
 }
+
+//////////////////// PAYMENT ////////////////////
 
 model Payment {
   id String @id @default(cuid())
@@ -179,37 +214,63 @@ model Payment {
   updatedAt DateTime @updatedAt
 
   @@index([bookingId])
-  @@index([paymentId])
 }
 
+//////////////////// NOTIFICATIONS ////////////////////
 model Notification {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
 
-  type    String
-  title   String
-  message String
-  data    Json?
+  bookingId String?      // ✅ عمود اختياري
+  booking   Booking?     @relation(fields: [bookingId], references: [id])
 
-  isRead    Boolean @default(false)
-  relatedId String?
+  type      String
+  title     String
+  message   String
+  data      Json?
 
-  createdAt DateTime @default(now())
+  isRead    Boolean   @default(false)
+  createdAt DateTime  @default(now())
 
   @@index([userId, isRead])
+  @@index([bookingId])
 }
+
+//////////////////// FLAGGED USERS ////////////////////
 
 model FlaggedUser {
   id     String @id @default(cuid())
   userId String
-  user   User   @relation(fields: [userId], references: [id])
+  user   User @relation(fields: [userId], references: [id])
 
   reason    String
-  severity  String    @default("MEDIUM")
+  severity  String @default("MEDIUM")
   expiresAt DateTime?
 
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+//////////////////// AUDIT LOG ////////////////////
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  userId String?
+  user   User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action     String
+  entityType String?
+  entityId   String?
+  oldValue   Json?
+  newValue   Json?
+  ipAddress  String?
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
 }

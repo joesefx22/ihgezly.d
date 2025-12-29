@@ -1,9 +1,13 @@
 // lib/constants.ts
+
 export const SLOT_STATUS = {
   AVAILABLE: 'AVAILABLE',
+  AVAILABLE_NEEDS_CONFIRM: 'AVAILABLE_NEEDS_CONFIRM',
   TEMP_LOCKED: 'TEMP_LOCKED',
-  NEED_CONFIRMATION: 'NEED_CONFIRMATION',
-  BOOKED: 'BOOKED'
+  BOOKED: 'BOOKED',
+
+  // 🟡 مرحلة انتقالية (اختياري)
+  NEED_CONFIRMATION: 'AVAILABLE_NEEDS_CONFIRM'
 } as const
 
 export const BOOKING_STATUS = {

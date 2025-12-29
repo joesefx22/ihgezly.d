@@ -1,4 +1,3 @@
-// components/booking/slot-booking-modal.tsx
 'use client'
 
 import { X, Clock, CreditCard, AlertCircle } from 'lucide-react'
@@ -12,7 +11,6 @@ interface SlotBookingModalProps {
     startTime: Date
     endTime: Date
     status: string
-    needsConfirmation: boolean
     price: number
     deposit: number
   }
@@ -34,21 +32,34 @@ export default function SlotBookingModal({ slot, fieldId, fieldName, onClose }: 
 
     setIsBooking(true)
     try {
+      // ✅ أول خطوة: نعمل lock للـ slot
+      const lockResponse = await fetch(`/api/fields/${fieldId}/slots/${slot.id}/lock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+      if (!lockResponse.ok) {
+        const err = await lockResponse.json()
+        alert(err.error || 'فشل في قفل الـ slot، حاول مرة أخرى')
+        setIsBooking(false)
+        return
+      }
+
+      // ✅ لو الـ lock نجح → نكمل الحجز
       const response = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           slotId: slot.id,
           fieldId,
-          startTime: slot.startTime,
-          needsConfirmation: slot.needsConfirmation
+          startTime: slot.startTime
         })
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        if (slot.needsConfirmation) {
+        if (slot.status === 'AVAILABLE_NEEDS_CONFIRM') {
           alert('تم تقديم طلب الحجز بنجاح! سيتم تأكيده من قبل الموظف خلال 14 ساعة.')
           onClose()
           router.push('/bookings')
@@ -100,59 +111,22 @@ export default function SlotBookingModal({ slot, fieldId, fieldName, onClose }: 
 
         {/* Content */}
         <div className="p-6">
-          {/* Field Info */}
-          <div className="mb-6">
-            <h4 className="font-bold text-gray-900 mb-2">{fieldName}</h4>
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-gray-600">
-                <Clock className="w-4 h-4" />
-                <span>{formatDate(slot.startTime)}</span>
-              </div>
-              <div className="flex items-center gap-2 text-gray-600">
-                <Clock className="w-4 h-4" />
-                <span>
-                  من {formatTime(slot.startTime)} إلى {formatTime(slot.endTime)}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-gray-600">
-                <CreditCard className="w-4 h-4" />
-                <span>السعر: {slot.price} جنيه</span>
-              </div>
+          <h4 className="font-bold text-gray-900 mb-2">{fieldName}</h4>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-gray-600">
+              <Clock className="w-4 h-4" />
+              <span>{formatDate(slot.startTime)}</span>
             </div>
-          </div>
-
-          {/* Notice if needs confirmation */}
-          {slot.needsConfirmation && (
-            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
-                <div>
-                  <h5 className="font-bold text-yellow-800 mb-1">تأكيد من الموظف مطلوب</h5>
-                  <p className="text-yellow-700 text-sm">
-                    بما أن الحجز قبل أقل من 24 ساعة، يحتاج هذا الحجز إلى تأكيد من الموظف.
-                    سيتم الرد خلال 14 ساعة على الأكثر.
-                  </p>
-                </div>
-              </div>
+            <div className="flex items-center gap-2 text-gray-600">
+              <Clock className="w-4 h-4" />
+              <span>
+                من {formatTime(slot.startTime)} إلى {formatTime(slot.endTime)}
+              </span>
             </div>
-          )}
-
-          {/* Booking Conditions */}
-          <div className="mb-6 p-4 bg-gray-50 rounded-xl">
-            <ul className="space-y-2 text-sm text-gray-600">
-              <li className="flex items-center gap-2">
-                <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
-                <span>في حالة الإلغاء قبل 24 ساعة، يتم استرداد العربون</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
-                <span>التأخير أكثر من 15 دقيقة يؤدي إلى إلغاء الحجز</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
-                <span>حد أقصى 2 ساعة حجز يومياً للاعب</span>
-              </li>
-            </ul>
+            <div className="flex items-center gap-2 text-gray-600">
+              <CreditCard className="w-4 h-4" />
+              <span>السعر: {slot.price} جنيه</span>
+            </div>
           </div>
         </div>
 
@@ -168,13 +142,9 @@ export default function SlotBookingModal({ slot, fieldId, fieldName, onClose }: 
             <button
               onClick={handleBook}
               disabled={isBooking}
-              className={`flex-1 py-3 px-4 rounded-xl font-bold text-white ${
-                slot.needsConfirmation
-                  ? 'bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700'
-                  : 'bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700'
-              } disabled:opacity-50`}
+              className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 disabled:opacity-50"
             >
-              {isBooking ? 'جاري الحجز...' : slot.needsConfirmation ? 'تقديم طلب الحجز' : 'دفع والحجز'}
+              {isBooking ? 'جاري الحجز...' : 'دفع والحجز'}
             </button>
           </div>
         </div>

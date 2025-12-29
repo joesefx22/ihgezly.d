@@ -1,79 +1,125 @@
 // prisma/seed.ts
-import { PrismaClient } from '@prisma/client'
-import { hash } from 'bcryptjs'
+import { PrismaClient, Prisma } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
-// Helper: generate time slots
-function generateSlots(opening: string, closing: string, durationMin: number) {
-  const slots = []
+// =======================
+// Helpers
+// =======================
+function generateSlotsForDays(
+  opening: string,
+  closing: string,
+  durationMin: number,
+  days: number
+) {
+  const slots: { startTime: Date; endTime: Date }[] = []
+
   const [openH, openM] = opening.split(':').map(Number)
   const [closeH, closeM] = closing.split(':').map(Number)
 
-  let start = new Date()
-  start.setHours(openH, openM, 0, 0)
+  for (let d = 0; d < days; d++) {
+    const start = new Date()
+    start.setDate(start.getDate() + d)
+    start.setHours(openH, openM, 0, 0)
 
-  let end = new Date()
-  end.setHours(closeH, closeM, 0, 0)
+    const end = new Date()
+    end.setDate(end.getDate() + d)
+    end.setHours(closeH, closeM, 0, 0)
 
-  // لو وقت الإغلاق أقل من وقت الفتح → نزود يوم
-  if (end <= start) {
-    end.setDate(end.getDate() + 1)
-  }
+    if (end <= start) {
+      end.setDate(end.getDate() + 1)
+    }
 
-  while (start < end) {
-    const slotStart = new Date(start)
-    const slotEnd = new Date(start.getTime() + durationMin * 60000)
+    let cursor = new Date(start)
 
-    if (slotEnd > end) break
+    while (cursor < end) {
+      const slotStart = new Date(cursor)
+      const slotEnd = new Date(cursor.getTime() + durationMin * 60000)
 
-    slots.push({
-      startTime: slotStart,
-      endTime: slotEnd
-    })
+      if (slotEnd > end) break
 
-    start = slotEnd
+      slots.push({ startTime: slotStart, endTime: slotEnd })
+      cursor = slotEnd
+    }
   }
 
   return slots
 }
 
+// =======================
+// Seed
+// =======================
 async function main() {
-  console.log('🌱 Seeding database...')
+  console.log('🌱 Starting database seeding...')
 
-  // 1. Users
-  const hashedPassword = await hash('password123', 12)
+  // 1️⃣ Clear data (order مهم)
+  await prisma.auditLog.deleteMany()
+  await prisma.slot.deleteMany()
+  await prisma.field.deleteMany()
+  await prisma.user.deleteMany()
 
-  const player = await prisma.user.create({
-    data: {
-      name: 'محمد أحمد',
-      email: 'player@example.com',
-      passwordHash: hashedPassword,
-      role: 'PLAYER',
-      phone: '01012345678'
-    }
-  })
+  console.log('🧹 Cleared existing data')
 
-  const employee = await prisma.user.create({
-    data: {
-      name: 'أحمد موظف',
-      email: 'employee@example.com',
-      passwordHash: hashedPassword,
-      role: 'EMPLOYEE',
-      phone: '01087654321'
-    }
-  })
+  // 2️⃣ Users
+  const hashedPassword = await bcrypt.hash('Password123!', 10)
 
-  const admin = await prisma.user.create({
-    data: {
-      name: 'Admin User',
-      email: 'admin@example.com',
-      passwordHash: hashedPassword,
-      role: 'ADMIN'
-    }
-  })
+  const users = await Promise.all([
+    prisma.user.create({
+      data: {
+        name: 'Player User',
+        email: 'player@example.com',
+        passwordHash: hashedPassword,
+        role: 'PLAYER',
+        isVerified: true,
+        isActive: true,
+        phoneNumber: '01000000000',
+        age: 25
+      }
+    }),
+    prisma.user.create({
+      data: {
+        name: 'Stadium Owner',
+        email: 'owner@example.com',
+        passwordHash: hashedPassword,
+        role: 'OWNER',
+        isVerified: true,
+        isActive: true,
+        phoneNumber: '01000000001',
+        age: 30
+      }
+    }),
+    prisma.user.create({
+      data: {
+        name: 'Employee User',
+        email: 'employee@example.com',
+        passwordHash: hashedPassword,
+        role: 'EMPLOYEE',
+        isVerified: true,
+        isActive: true,
+        phoneNumber: '01000000002',
+        age: 28
+      }
+    }),
+    prisma.user.create({
+      data: {
+        name: 'Admin User',
+        email: 'admin@example.com',
+        passwordHash: hashedPassword,
+        role: 'ADMIN',
+        isVerified: true,
+        isActive: true,
+        phoneNumber: '01000000003',
+        age: 35
+      }
+    })
+  ])
 
-  // 2. Fields
+  const adminUser = users.find(u => u.role === 'ADMIN')!
+
+  console.log('✅ Users created')
+
+  // 3️⃣ Fields
   const fields = await Promise.all([
     prisma.field.create({
       data: {
@@ -99,7 +145,7 @@ async function main() {
         pricePerHour: 350,
         depositPrice: 150,
         openingTime: '09:00',
-        closingTime: '23:59', // ✅ تعديل هنا
+        closingTime: '23:59',
         slotDurationMin: 90,
         facilities: ['تغيير ملابس', 'دش', 'باركينج', 'إضاءة LED'],
         imageUrl: '/images/fields/football2.jpg'
@@ -122,9 +168,16 @@ async function main() {
     })
   ])
 
-  // 3. Generate Slots for each field
+  console.log('🏟️ Fields created')
+
+  // 4️⃣ Slots (7 أيام)
   for (const field of fields) {
-    const slots = generateSlots(field.openingTime, field.closingTime, field.slotDurationMin)
+    const slots = generateSlotsForDays(
+      field.openingTime,
+      field.closingTime,
+      field.slotDurationMin,
+      7
+    )
 
     await prisma.slot.createMany({
       data: slots.map(s => ({
@@ -135,52 +188,41 @@ async function main() {
     })
   }
 
-  // 4. Create a booking for testing
-  const firstField = fields[0]
+  console.log('⏰ Slots generated')
 
-  const firstSlot = await prisma.slot.findFirst({
-    where: { fieldId: firstField.id }
+  // 5️⃣ Audit Logs
+  await prisma.auditLog.createMany({
+    data: [
+      {
+        userId: adminUser.id,
+        action: 'REGISTER',
+        entityType: 'USER',
+        entityId: adminUser.id,
+        oldValue: Prisma.JsonNull, // 👈 النوع الصحيح
+        newValue: { email: adminUser.email, role: adminUser.role },
+        ipAddress: '127.0.0.1',
+        userAgent: 'Seeder'
+      },
+      {
+        userId: adminUser.id,
+        action: 'LOGIN',
+        entityType: 'USER',
+        entityId: adminUser.id,
+        oldValue: Prisma.JsonNull, // 👈 النوع الصحيح
+        newValue: { timestamp: new Date().toISOString() },
+        ipAddress: '127.0.0.1',
+        userAgent: 'Seeder'
+      }
+    ]
   })
 
-  if (firstSlot) {
-    const booking = await prisma.booking.create({
-      data: {
-        userId: player.id,
-        fieldId: firstField.id,
-        slotId: firstSlot.id,
-        status: 'CONFIRMED',
-        paymentStatus: 'PAID',
-        totalAmount: firstField.pricePerHour,
-        depositPaid: firstField.depositPrice
-      }
-    })
-
-    await prisma.payment.create({
-      data: {
-        bookingId: booking.id,
-        amount: booking.totalAmount,
-        status: 'PAID',
-        currency: 'EGP'
-      }
-    })
-
-    await prisma.notification.create({
-      data: {
-        userId: player.id,
-        type: 'BOOKING_CONFIRMED',
-        title: 'تم تأكيد الحجز',
-        message: `تم تأكيد حجزك في ${firstField.name}.`,
-        relatedId: booking.id
-      }
-    })
-  }
-
-  console.log('✅ Database seeded successfully!')
+  console.log('📝 Audit logs created')
+  console.log('🎉 Seeding completed successfully!')
 }
 
 main()
-  .catch((e) => {
-    console.error('❌ Error seeding database:', e)
+  .catch(e => {
+    console.error('❌ Seeding error:', e)
     process.exit(1)
   })
   .finally(async () => {

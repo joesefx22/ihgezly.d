@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     // البحث عن الحجز المرتبط
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { field: true }
+      include: { field: true, slot: true } // ✅ أضف slot هنا
     })
 
     if (!booking) {
@@ -46,8 +46,8 @@ export async function POST(request: NextRequest) {
           where: { id: bookingId },
           data: {
             status: 'CONFIRMED',
-            paymentStatus: 'PAID',
-            paymentId: transactionId.toString()
+            paymentStatus: 'PAID'
+            // ❌ شيل paymentId من هنا
           }
         })
 
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
             bookingId,
             amount: amount_cents / 100,
             currency,
-            paymentId: transactionId.toString(),
+            paymentId: transactionId.toString(), // ✅ هنا مكانه الصح
             orderId: orderId.toString(),
             status: 'PAID',
             metadata: {
