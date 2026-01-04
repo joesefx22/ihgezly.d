@@ -1,136 +1,100 @@
 // app/api/webhooks/paymob/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { paymob } from '@/lib/paymob'
+import { NextRequest } from 'next/server'
+import { bookingOrchestrator } from '@/lib/application/services/booking-orchestrator'  // ✅ المسار الجديد
+import { paymobService } from '@/lib/infrastructure/payments/providers'  // ✅ المسار الجديد
+import { assertWebhookValid } from '@/lib/domain/guards/payment-guards'  // ✅ المسار الجديد
+import { apiErrorHandler } from '@/lib/shared/api/api-error-handler'  // ✅ المسار الجديد
+import { logger } from '@/lib/shared/logger'  // ✅ استخدام الـ logger الجديد
 
 export async function POST(request: NextRequest) {
+  const webhookId = `webhook_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
   try {
+    logger.info('Processing Paymob webhook', { webhookId })
+
     const body = await request.json()
     const hmac = request.headers.get('hmac')
-
-    // التحقق من صحة الـ Webhook
-    if (!hmac || !paymob.verifyHMAC(body.obj, hmac)) {
-      console.error('Invalid HMAC signature')
-      return NextResponse.json(
-        { error: 'Invalid signature' },
-        { status: 401 }
-      )
+    
+    if (!hmac) {
+      logger.error('HMAC header missing', { webhookId })
+      return apiErrorHandler(new Error('HMAC header missing'))
     }
 
-    const { 
-      id: transactionId,
-      amount_cents,
+    // 1️⃣ التحقق من HMAC
+    if (!paymobService.verifyHMAC(body.obj, hmac)) {
+      logger.error('Invalid HMAC signature', { webhookId })
+      return apiErrorHandler(new Error('Invalid HMAC signature'))
+    }
+
+    // 2️⃣ استخراج البيانات
+    const {
       success,
+      amount_cents,
+      id: transactionId,
       order: { id: orderId, merchant_order_id: bookingId },
       created_at,
-      currency,
-      source_data: { pan, sub_type, type }
+      currency = 'EGP'
     } = body.obj
 
-    // البحث عن الحجز المرتبط
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: { field: true, slot: true } // ✅ أضف slot هنا
+    logger.info('Webhook data extracted', {
+      webhookId,
+      bookingId,
+      orderId,
+      transactionId,
+      success,
+      amount: amount_cents / 100
     })
 
-    if (!booking) {
-      console.error('Booking not found:', bookingId)
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
-    }
+    // 3️⃣ التحقق من صحة الـ webhook
+    const payment = await assertWebhookValid({
+      orderId: orderId.toString(),
+      transactionId: transactionId.toString(),
+      amount: amount_cents / 100,
+    })
 
-    // تحديث حالة الدفع
-    if (success) {
-      await prisma.$transaction(async (tx) => {
-        // تحديث حالة الحجز
-        await tx.booking.update({
-          where: { id: bookingId },
-          data: {
-            status: 'CONFIRMED',
-            paymentStatus: 'PAID'
-            // ❌ شيل paymentId من هنا
-          }
-        })
+    logger.info('Webhook validated', {
+      webhookId,
+      paymentId: payment.id,
+      bookingId: payment.bookingId
+    })
 
-        // تحديث حالة الـ Slot
-        await tx.slot.update({
-          where: { id: booking.slotId },
-          data: { status: 'BOOKED' }
-        })
+    // 4️⃣ معالجة الحجز
+    await bookingOrchestrator.completeBooking({
+      bookingId: payment.bookingId,
+      success: Boolean(success),
+      paymentDetails: {
+        transactionId: transactionId.toString(),
+        orderId: orderId.toString(),
+        amount: amount_cents / 100,
+        currency,
+        webhookData: body.obj
+      },
+    })
 
-        // إنشاء سجل الدفع
-        await tx.payment.create({
-          data: {
-            bookingId,
-            amount: amount_cents / 100,
-            currency,
-            paymentId: transactionId.toString(), // ✅ هنا مكانه الصح
-            orderId: orderId.toString(),
-            status: 'PAID',
-            metadata: {
-              pan,
-              sub_type,
-              type,
-              created_at: new Date(created_at * 1000)
-            }
-          }
-        })
+    logger.info('Booking processing completed', {
+      webhookId,
+      bookingId: payment.bookingId,
+      success
+    })
 
-        // إرسال إشعار للمستخدم
-        await tx.notification.create({
-          data: {
-            userId: booking.userId,
-            type: 'PAYMENT_SUCCESS',
-            title: 'تم الدفع بنجاح',
-            message: `تم دفع ${amount_cents / 100} ج.م لحجزك في ${booking.field.name}`,
-            relatedId: bookingId,
-            data: {
-              amount: amount_cents / 100,
-              fieldName: booking.field.name,
-              date: booking.slot.startTime
-            }
-          }
-        })
-      })
+    // 5️⃣ إرجاع استجابة ناجحة لـ Paymob
+    return new Response('OK', { 
+      status: 200,
+      headers: {
+        'Content-Type': 'text/plain'
+      }
+    })
 
-      console.log(`Payment successful for booking ${bookingId}`)
-    } else {
-      // فشل الدفع
-      await prisma.$transaction(async (tx) => {
-        await tx.booking.update({
-          where: { id: bookingId },
-          data: {
-            status: 'FAILED',
-            paymentStatus: 'FAILED'
-          }
-        })
-
-        // إعادة الـ Slot لمتاح
-        await tx.slot.update({
-          where: { id: booking.slotId },
-          data: { status: 'AVAILABLE' }
-        })
-
-        // إشعار بالفشل
-        await tx.notification.create({
-          data: {
-            userId: booking.userId,
-            type: 'PAYMENT_FAILED',
-            title: 'فشل الدفع',
-            message: 'فشل عملية الدفع، يرجى المحاولة مرة أخرى',
-            relatedId: bookingId
-          }
-        })
-      })
-
-      console.log(`Payment failed for booking ${bookingId}`)
-    }
-
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error('Webhook error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+  } catch (error: any) {
+    logger.error('Webhook processing error', error, { webhookId })
+    
+    // إرجاع استجابة لـ Paymob حتى في حالة الخطأ
+    // (Paymob سيعيد المحاولة لاحقاً)
+    return new Response('ERROR', { 
+      status: 500,
+      headers: {
+        'Content-Type': 'text/plain'
+      }
+    })
   }
 }

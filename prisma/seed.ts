@@ -1,5 +1,5 @@
 // prisma/seed.ts
-import { PrismaClient, Prisma } from '@prisma/client'
+import {PrismaClient} from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
@@ -8,24 +8,19 @@ const prisma = new PrismaClient()
 // Helpers
 // =======================
 function generateSlotsForDays(
-  opening: string,
-  closing: string,
+  opening: Date,
+  closing: Date,
   durationMin: number,
   days: number
 ) {
   const slots: { startTime: Date; endTime: Date }[] = []
 
-  const [openH, openM] = opening.split(':').map(Number)
-  const [closeH, closeM] = closing.split(':').map(Number)
-
   for (let d = 0; d < days; d++) {
-    const start = new Date()
+    const start = new Date(opening)
     start.setDate(start.getDate() + d)
-    start.setHours(openH, openM, 0, 0)
 
-    const end = new Date()
+    const end = new Date(closing)
     end.setDate(end.getDate() + d)
-    end.setHours(closeH, closeM, 0, 0)
 
     if (end <= start) {
       end.setDate(end.getDate() + 1)
@@ -120,6 +115,8 @@ async function main() {
   console.log('✅ Users created')
 
   // 3️⃣ Fields
+  const today = new Date()
+
   const fields = await Promise.all([
     prisma.field.create({
       data: {
@@ -129,8 +126,8 @@ async function main() {
         type: 'FOOTBALL',
         pricePerHour: 300,
         depositPrice: 100,
-        openingTime: '08:00',
-        closingTime: '23:00',
+        openingTime: new Date(today.setHours(8, 0, 0, 0)),
+        closingTime: new Date(today.setHours(23, 0, 0, 0)),
         slotDurationMin: 60,
         facilities: ['إضاءة ليلية', 'تغيير ملابس', 'باركينج', 'كافتيريا'],
         imageUrl: '/images/fields/football1.jpg'
@@ -144,8 +141,8 @@ async function main() {
         type: 'FOOTBALL',
         pricePerHour: 350,
         depositPrice: 150,
-        openingTime: '09:00',
-        closingTime: '23:59',
+        openingTime: new Date(today.setHours(9, 0, 0, 0)),
+        closingTime: new Date(today.setHours(23, 59, 0, 0)),
         slotDurationMin: 90,
         facilities: ['تغيير ملابس', 'دش', 'باركينج', 'إضاءة LED'],
         imageUrl: '/images/fields/football2.jpg'
@@ -159,8 +156,8 @@ async function main() {
         type: 'PADEL',
         pricePerHour: 250,
         depositPrice: 80,
-        openingTime: '07:00',
-        closingTime: '22:00',
+        openingTime: new Date(today.setHours(7, 0, 0, 0)),
+        closingTime: new Date(today.setHours(22, 0, 0, 0)),
         slotDurationMin: 60,
         facilities: ['تكييف', 'كافتيريا', 'مدرب', 'معدات'],
         imageUrl: '/images/fields/padel1.jpg'
@@ -198,7 +195,7 @@ async function main() {
         action: 'REGISTER',
         entityType: 'USER',
         entityId: adminUser.id,
-        oldValue: Prisma.JsonNull, // 👈 النوع الصحيح
+        oldValue: null,
         newValue: { email: adminUser.email, role: adminUser.role },
         ipAddress: '127.0.0.1',
         userAgent: 'Seeder'
@@ -208,7 +205,7 @@ async function main() {
         action: 'LOGIN',
         entityType: 'USER',
         entityId: adminUser.id,
-        oldValue: Prisma.JsonNull, // 👈 النوع الصحيح
+        oldValue: null,
         newValue: { timestamp: new Date().toISOString() },
         ipAddress: '127.0.0.1',
         userAgent: 'Seeder'

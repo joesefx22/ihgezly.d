@@ -1,221 +1,110 @@
-// app/(dashboard)/(player)/page.tsx
-'use client';
+// app/page.tsx
+'use client'
+// app/layout.tsx أو app/page.tsx
+import { startupCheck } from '@/lib/env/startup-check'
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/context/authcontext';
-import Header from '@/components/layout/header';
-import Footer from '@/components/layout/footer';
-import LoadingSpinner from '@/components/ui/loadingspinner';
-import Button from '@/components/ui/button';
-import Card from '@/components/ui/card';
+// في Server Component
+await startupCheck()
+import { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
+import DaySelector from './components/booking/day-selector'
+import SlotGrid from './components/booking/slot-grid'
+import { generateNextDays } from '@/lib/time-slots/core-logic'
 
-export default function PlayerDashboard() {
-  const { user, logout, isLoading, isAuthenticated } = useAuth();
-  const router = useRouter();
+export default function HomePage() {
+  const { data: session } = useSession()
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date())
+  const [slots, setSlots] = useState<any[]>([])
+  const [field, setField] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  
+  const days = generateNextDays(10)
 
-  // 🔒 تأمين الصفحة
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push('/login');
+    fetchSlots()
+  }, [selectedDate])
+
+  const fetchSlots = async () => {
+    try {
+      setLoading(true)
+      // TODO: احصل fieldId من context أو params
+      const fieldId = '1' // مؤقت
+      
+      const dateStr = selectedDate.toISOString().split('T')[0]
+      const res = await fetch(`/api/fields/${fieldId}/slots?date=${dateStr}`)
+      const data = await res.json()
+      
+      setSlots(data.slots)
+      setField(data.field)
+    } catch (error) {
+      console.error('Error fetching slots:', error)
+    } finally {
+      setLoading(false)
     }
-  }, [isLoading, isAuthenticated, router]);
-
-  // ✅ تحقق من الرول
-  useEffect(() => {
-    if (user && user.role !== 'PLAYER') {
-      switch (user.role) {
-        case 'ADMIN':
-          router.push('/dashboard/admin');
-          break;
-        case 'OWNER':
-          router.push('/dashboard/owner');
-          break;
-        case 'EMPLOYEE':
-          router.push('/dashboard/employee');
-          break;
-        default:
-          router.push('/dashboard');
-      }
-    }
-  }, [user, router]);
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated || !user) {
-    return null; // سيتم التوجيه في useEffect
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header user={user} />
-      
-      <main className="container mx-auto px-4 py-8">
-        {/* Header Section */}
-        <div className="mb-8 bg-white rounded-2xl shadow-sm p-6">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                مرحباً، {user.name || 'لاعب'} 👋
-              </h1>
-              <p className="text-gray-600 mt-2">
-                لوحة تحكم اللاعب • {user.email}
-              </p>
-              <div className="mt-3 flex items-center gap-2">
-                <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
-                  {user.role}
+      <div className="container mx-auto px-4 py-8">
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">حجز الملاعب</h1>
+          <p className="text-gray-600 mt-2">اختر الوقت المناسب وحجز ملاعبك المفضلة</p>
+        </header>
+
+        <div className="bg-white rounded-2xl shadow-lg p-6">
+          {field && (
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold mb-2">{field.name}</h2>
+              <p className="text-gray-600">{field.description}</p>
+              <div className="flex items-center gap-4 mt-3">
+                <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">
+                  {field.pricePerHour} ج.م/ساعة
                 </span>
-                <span className="text-sm text-gray-500">
-  عضو منذ {new Date(user.createdAt ?? Date.now()).toLocaleDateString('ar-EG')}
-</span>
+                <span className="text-gray-600">
+                  مواعيد العمل: {field.openingTime} - {field.closingTime}
+                </span>
               </div>
             </div>
-            
-            <div className="flex gap-3">
-              <Button 
-                onClick={() => router.push('/dashboard/player/fields')}
-                variant="primary"
-              >
-                🏟️ استعرض الملاعب
-              </Button>
-              <Button 
-                onClick={() => logout()}
-                variant="outline"
-              >
-                تسجيل الخروج
-              </Button>
+          )}
+
+          <DaySelector
+            days={days}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+          />
+
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <p className="mt-4 text-gray-600">جاري تحميل المواعيد...</p>
             </div>
+          ) : (
+            <SlotGrid
+              slots={slots}
+              fieldId={field?.id || ''}
+              fieldName={field?.name || ''}
+              userId={session?.user?.id}
+            />
+          )}
+        </div>
+
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white p-4 rounded-xl border">
+            <h4 className="font-bold mb-2">🚀 حجز فوري</h4>
+            <p className="text-sm text-gray-600">احجز وادفع مباشرة للمواعيد بعد 24 ساعة</p>
+          </div>
+          
+          <div className="bg-white p-4 rounded-xl border">
+            <h4 className="font-bold mb-2">⏰ تأكيد يدوي</h4>
+            <p className="text-sm text-gray-600">المواعيد القريبة تحتاج تأكيد من الإدارة</p>
+          </div>
+          
+          <div className="bg-white p-4 rounded-xl border">
+            <h4 className="font-bold mb-2">🔒 قفل آمن</h4>
+            <p className="text-sm text-gray-600">الموعد يبقى مقفول لك 5 دقائق لإتمام الحجز</p>
           </div>
         </div>
-
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="p-6 hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                <span className="text-2xl">📅</span>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">الحجوزات النشطة</p>
-                <p className="text-2xl font-bold">3</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <span className="text-2xl">⏰</span>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">الساعات المحجوزة</p>
-                <p className="text-2xl font-bold">12</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                <span className="text-2xl">💰</span>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">المدفوعات</p>
-                <p className="text-2xl font-bold">1,250 ج.م</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-                <span className="text-2xl">⭐</span>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">التقييم</p>
-                <p className="text-2xl font-bold">4.8</p>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Main Actions Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer"
-                onClick={() => router.push('/dashboard/player/fields')}>
-            <div className="text-center">
-              <div className="text-5xl mb-4">🏟️</div>
-              <h3 className="text-xl font-bold mb-3">حجز ملاعب</h3>
-              <p className="text-gray-600 mb-4">
-                استعرض الملاعب المتاحة واحجز موعدك
-              </p>
-              <Button className="w-full" variant="outline">
-                تصفح الملاعب
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer"
-                onClick={() => router.push('/dashboard/player/bookings')}>
-            <div className="text-center">
-              <div className="text-5xl mb-4">📋</div>
-              <h3 className="text-xl font-bold mb-3">حجوزاتي</h3>
-              <p className="text-gray-600 mb-4">
-                إدارة وتعديل الحجوزات الحالية والسابقة
-              </p>
-              <Button className="w-full" variant="outline">
-                عرض الحجوزات
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer"
-                onClick={() => router.push('/dashboard/player/payment')}>
-            <div className="text-center">
-              <div className="text-5xl mb-4">💳</div>
-              <h3 className="text-xl font-bold mb-3">الدفع</h3>
-              <p className="text-gray-600 mb-4">
-                إدارة طرق الدفع وسجل المعاملات
-              </p>
-              <Button className="w-full" variant="outline">
-                الدفع والحسابات
-              </Button>
-            </div>
-          </Card>
-        </div>
-
-        {/* Recent Activity */}
-        <Card className="p-6 mb-8">
-          <h2 className="text-xl font-bold mb-6 text-gray-900">النشاط الأخير</h2>
-          <div className="space-y-4">
-            {[
-              { action: 'تم تأكيد حجز ملعب كرة القدم', time: 'منذ ساعتين', status: '✅' },
-              { action: 'تم دفع قيمة الحجز', time: 'منذ يوم', status: '💰' },
-              { action: 'تم تحديث الملف الشخصي', time: 'منذ 3 أيام', status: '📝' },
-              { action: 'تقييم ملعب النادي الأهلي', time: 'منذ أسبوع', status: '⭐' },
-            ].map((item, index) => (
-              <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                <div className="flex items-center gap-4">
-                  <span className="text-xl">{item.status}</span>
-                  <div>
-                    <div className="font-medium">{item.action}</div>
-                    <div className="text-sm text-gray-500">{item.time}</div>
-                  </div>
-                </div>
-                <Button size="sm" variant="ghost">عرض</Button>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </main>
-      
-      <Footer />
+      </div>
     </div>
-  );
+  )
 }
