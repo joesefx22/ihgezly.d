@@ -1,7 +1,10 @@
 // app/api/fields/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { FIELD_STATUS } from '@/lib/constants'
+import { prisma } from '@/lib/infrastructure/database/prisma'  // ✅ المسار الجديد
+import { FIELD_STATUS } from '@/lib/shared/constants'  // ✅ المسار الجديد
+import { DomainError } from '@/lib/core/errors/domain-errors'  // ✅ المسار الجديد
+import { apiErrorHandler } from '@/lib/shared/api/api-error-handler'  // ✅ المسار الجديد
+import { logger } from '@/lib/shared/logger'  // ✅ استخدام الـ logger الجديد
 
 interface Params {
   params: {
@@ -10,17 +13,18 @@ interface Params {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: Params
 ) {
+  const requestId = `get_field_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
   try {
     const fieldId = params.id
 
+    logger.info('Fetching field details', { requestId, fieldId })
+
     if (!fieldId) {
-      return NextResponse.json(
-        { error: 'معرّف الملعب غير صالح' },
-        { status: 400 }
-      )
+      throw new DomainError('VALIDATION_ERROR', 'معرّف الملعب غير صالح')
     }
 
     const field = await prisma.field.findUnique({
@@ -39,52 +43,46 @@ export async function GET(
         closingTime: true,
         slotDurationMin: true,
         status: true,
-        facilities: true
+        facilities: true,
+        gallery: true,
+        rating: true,
+        reviewCount: true
       }
     })
 
     if (!field) {
-      return NextResponse.json(
-        { error: 'الملعب غير موجود' },
-        { status: 404 }
-      )
+      logger.warn('Field not found', { requestId, fieldId })
+      throw new DomainError('FIELD_NOT_FOUND', 'الملعب غير موجود')
     }
 
-    // اللاعب لا يرى الملاعب المقفولة أو تحت الصيانة
-    if (
-      field.status === FIELD_STATUS.CLOSED ||
-      field.status === FIELD_STATUS.MAINTENANCE
-    ) {
-      return NextResponse.json(
-        { error: 'الملعب غير متاح حاليًا' },
-        { status: 403 }
-      )
+    if (field.status === FIELD_STATUS.CLOSED || field.status === FIELD_STATUS.MAINTENANCE) {
+      logger.warn('Field not available', { requestId, fieldId, status: field.status })
+      return NextResponse.json({
+        success: false,
+        error: 'الملعب غير متاح حاليًا',
+        code: 'FIELD_UNAVAILABLE',
+        field: {
+          id: field.id,
+          name: field.name,
+          status: field.status
+        }
+      }, { status: 403 })
     }
 
+    logger.info('Field details fetched successfully', { requestId, fieldId })
+    
     return NextResponse.json({
-      field: {
-        id: field.id,
-        name: field.name,
-        description: field.description,
-        location: field.location,
-        address: field.address,
-        type: field.type,
-        imageUrl: field.imageUrl,
-        pricePerHour: field.pricePerHour,
-        depositPrice: field.depositPrice,
-        openingTime: field.openingTime,
-        closingTime: field.closingTime,
-        slotDurationMin: field.slotDurationMin,
-        facilities: field.facilities,
-        status: field.status
+      success: true,
+      data: {
+        field: {
+          ...field,
+          gallery: field.gallery || []
+        }
       }
     })
-  } catch (error) {
-    console.error('Error fetching field:', error)
-
-    return NextResponse.json(
-      { error: 'حدث خطأ أثناء تحميل بيانات الملعب' },
-      { status: 500 }
-    )
+    
+  } catch (error: any) {
+    logger.error('Error fetching field', error, { requestId })
+    return apiErrorHandler(error)
   }
 }

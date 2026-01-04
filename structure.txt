@@ -1,0 +1,201 @@
+.
+├── app
+│   ├── (auth)
+│   │   ├── layout.tsx
+│   │   ├── login
+│   │   │   └── page.tsx
+│   │   └── register
+│   │       └── page.tsx
+│   ├── (dashboard)
+│   │   ├── (player)
+│   │   │   ├── bookings
+│   │   │   │   └── page.tsx
+│   │   │   ├── fields
+│   │   │   │   ├── [id]
+│   │   │   │   │   └── page.tsx
+│   │   │   │   └── page.tsx
+│   │   │   ├── layout.tsx
+│   │   │   ├── page.tsx
+│   │   │   └── payment
+│   │   │       ├── failed
+│   │   │       │   └── page.tsx
+│   │   │       ├── page.tsx
+│   │   │       └── success
+│   │   │           └── page.tsx
+│   │   ├── admin
+│   │   │   ├── page.tsx
+│   │   │   └── users
+│   │   │       └── page.tsx
+│   │   ├── employee
+│   │   │   └── page.tsx
+│   │   ├── layout.tsx
+│   │   ├── owner
+│   │   │   └── page.tsx
+│   │   └── page.tsx
+│   ├── api
+│   │   ├── auth
+│   │   │   ├── [...nextauth]
+│   │   │   │   └── route.ts
+│   │   │   ├── me
+│   │   │   │   └── route.ts
+│   │   │   └── register
+│   │   │       └── route.ts
+│   │   ├── bookings
+│   │   │   └── route.ts
+│   │   ├── cron
+│   │   │   └── cleanup
+│   │   │       └── route.ts
+│   │   ├── fields
+│   │   │   ├── [id]
+│   │   │   │   ├── route.ts
+│   │   │   │   └── slots
+│   │   │   │       ├── [date]
+│   │   │   │       │   └── route.ts
+│   │   │   │       ├── [slotid]
+│   │   │   │       │   └── lock
+│   │   │   │       │       └── route.ts
+│   │   │   │       └── route.ts
+│   │   │   └── route.ts
+│   │   ├── payments
+│   │   │   └── create
+│   │   │       └── route.ts
+│   │   └── webhooks
+│   │       └── paymob
+│   │           └── route.ts
+│   └── globals.css
+├── components
+│   ├── booking
+│   │   ├── countdown-timer.tsx
+│   │   ├── day-selector.tsx
+│   │   ├── slot-booking-modal.tsx
+│   │   ├── slot-grid.tsx
+│   │   └── slots-mapper.ts
+│   ├── fields
+│   │   ├── field-card.tsx
+│   │   └── location-filter.tsx
+│   ├── home
+│   │   ├── featured-fields.tsx
+│   │   ├── hero-section.tsx
+│   │   ├── how-it-works.tsx
+│   │   ├── main-card.tsx
+│   │   └── main-cards-grid.tsx
+│   ├── layout
+│   │   ├── footer.tsx
+│   │   ├── header.tsx
+│   │   └── navbar.tsx
+│   └── ui
+│       ├── alert.tsx
+│       ├── badge.tsx
+│       ├── button.tsx
+│       ├── card.tsx
+│       ├── input.tsx
+│       ├── loadingspinner.tsx
+│       └── toast.tsx
+├── jest.config.js
+├── jest.setup.js
+├── lib
+│   ├── api
+│   │   └── api-error-handler.ts
+│   ├── application
+│   │   ├── idempotency
+│   │   │   └── idempotency
+│   │   │       └── idempotency-guard.ts
+│   │   ├── jobs
+│   │   │   └── jobs
+│   │   │       ├── expire-bookings.ts
+│   │   │       └── unlock-slots.ts
+│   │   └── services
+│   │       ├── booking-orchestrator.ts
+│   │       └── booking-transitions.ts
+│   ├── booking
+│   ├── core
+│   │   ├── errors
+│   │   │   └── errors
+│   │   │       ├── domain-errors.ts
+│   │   │       └── error-codes.ts
+│   │   └── types
+│   │       └── types
+│   │           └── index.ts
+│   ├── domain
+│   │   ├── booking
+│   │   │   └── types.ts
+│   │   ├── guards
+│   │   │   └── guards
+│   │   │       ├── assertBookingState.ts
+│   │   │       ├── assertPaymentState.ts
+│   │   │       └── assertslotstate.ts
+│   │   ├── payments
+│   │   └── slots
+│   │       ├── slots
+│   │       │   └── read-model.ts
+│   │       └── time-slots
+│   │           ├── booking-limits.ts
+│   │           └── core-logic.ts
+│   ├── helpers
+│   ├── infrastructure
+│   │   ├── auth
+│   │   │   ├── auth
+│   │   │   │   ├── auth-options.ts
+│   │   │   │   ├── errors.ts
+│   │   │   │   ├── logger.ts
+│   │   │   │   ├── responses.ts
+│   │   │   │   └── validators.ts
+│   │   │   └── nextauth
+│   │   ├── database
+│   │   │   └── prisma.ts
+│   │   ├── notifications
+│   │   │   └── notifications
+│   │   │       └── notification-service.ts
+│   │   ├── payments
+│   │   │   └── providers
+│   │   │       ├── hmac-verifier.ts
+│   │   │       └── index.ts
+│   │   └── security
+│   │       └── security
+│   │           └── password.ts
+│   └── shared
+│       ├── api
+│       │   └── api-error-handler.ts
+│       ├── constants
+│       │   ├── constants
+│       │   │   ├── index.ts
+│       │   │   └── status.ts
+│       │   └── global.ts
+│       ├── context
+│       │   └── request-context.ts
+│       ├── env
+│       │   └── env
+│       │       ├── env.ts
+│       │       └── startup-check.ts
+│       ├── helpers
+│       │   ├── api-auth.ts
+│       │   └── index.ts
+│       ├── logger
+│       │   ├── auth-logger.ts
+│       │   ├── booking-logger.ts
+│       │   ├── index.ts
+│       │   └── payment-logger.ts
+│       └── utils
+│           └── index.ts
+├── middleware.ts
+├── next-env.d.ts
+├── next.config.js
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── prisma
+│   ├── migrations
+│   │   ├── 20251222150019_seed
+│   │   │   └── migration.sql
+│   │   ├── 20251228182542_init
+│   │   │   └── migration.sql
+│   │   └── migration_lock.toml
+│   ├── schema.prisma
+│   └── seed.ts
+├── structure.txt
+├── tailwind.config.ts
+├── tsconfig.json
+└── types
+    └── next-auth.d.ts
+
+90 directories, 109 files

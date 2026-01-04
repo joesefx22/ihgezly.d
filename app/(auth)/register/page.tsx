@@ -1,4 +1,3 @@
-// app/(auth)/register/page.tsx
 'use client'
 
 import { useState } from 'react'
@@ -7,7 +6,6 @@ import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { registerSchema, RegisterInput } from '@/lib/auth/validators'
-import { useAuth } from '@/context/authcontext'
 import { 
   User, 
   Mail, 
@@ -26,13 +24,12 @@ import {
 import Button from '@/components/ui/button'
 import Input from '@/components/ui/input'
 import Alert from '@/components/ui/alert'
-import { cn, getGradientColor } from '@/lib/helpers'
+import { cn } from '@/lib/helpers'
 
 export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [skillLevel, setSkillLevel] = useState<'WEAK' | 'AVERAGE' | 'GOOD' | 'EXCELLENT' | 'LEGENDARY'>('AVERAGE')
-  const { register: registerUser, isAuthenticated } = useAuth()
   const router = useRouter()
   
   const {
@@ -51,25 +48,41 @@ export default function RegisterPage() {
       phoneNumber: '',
       age: undefined,
       description: '',
-      skillLevel: 'AVERAGE' // تأكد أن القيمة الافتراضية موجودة هنا
+      skillLevel: 'AVERAGE'
     }
   })
 
-  // Redirect if already authenticated
-  if (isAuthenticated) {
-    router.push('/dashboard')
-    return null
-  }
+  // ✅ التعديل: إزالة useAuth() واستخدام fetch مباشرة
+  const registerUser = async (data: RegisterInput) => {
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    
+    const result = await response.json();
+    if (!result.success) throw new Error(result.error);
+    
+    // Redirect to login
+    router.push('/login?registered=true');
+  };
 
   const password = watch('password')
+  const confirmPassword = watch('confirmPassword')
   const description = watch('description')
-  // إزالتنا للمتغير age إذا لم نستخدمه
+
+  // ✅ التعديل: سياسة باسورد مبسطة (6 أحرف فقط)
+  const passwordChecks = [
+    { label: '6 أحرف على الأقل', check: password?.length >= 6 },
+    { label: 'أقل من 72 حرفاً', check: password?.length <= 72 },
+  ];
 
   const onSubmit = async (data: RegisterInput) => {
     setIsLoading(true)
     setError('')
     
     try {
+      // ✅ استخدام الدالة الجديدة
       await registerUser(data)
     } catch (err: any) {
       setError(err.message || 'فشل في التسجيل')
@@ -86,18 +99,10 @@ export default function RegisterPage() {
     { value: 'LEGENDARY' as const, label: 'أسطوري', desc: 'خبير', icon: '👑' }
   ]
 
-  const passwordChecks = [
-    { label: '8 أحرف على الأقل', check: password?.length >= 8 },
-    { label: 'حرف كبير (A-Z)', check: /[A-Z]/.test(password || '') },
-    { label: 'حرف صغير (a-z)', check: /[a-z]/.test(password || '') },
-    { label: 'رقم (0-9)', check: /[0-9]/.test(password || '') },
-    { label: 'رمز خاص (!@#$)', check: /[^A-Za-z0-9]/.test(password || '') }
-  ]
-
   const passwordStrength = passwordChecks.filter(check => check.check).length
-  const strengthPercentage = (passwordStrength / 5) * 100
-  const strengthColor = passwordStrength <= 2 ? 'red' : passwordStrength <= 3 ? 'yellow' : 'green'
-  const strengthText = passwordStrength <= 2 ? 'ضعيفة' : passwordStrength <= 3 ? 'متوسطة' : 'قوية'
+  const strengthPercentage = (passwordStrength / 2) * 100
+  const strengthColor = passwordStrength <= 1 ? 'red' : 'green'
+  const strengthText = passwordStrength <= 1 ? 'ضعيفة' : 'جيدة'
 
   const selectedSkill = skillLevels.find(level => level.value === skillLevel)
 
@@ -140,8 +145,8 @@ export default function RegisterPage() {
                     <ShieldCheck className="w-8 h-8 text-blue-400" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-semibold text-white">حماية فائقة</h3>
-                    <p className="text-gray-400 mt-1">أمان متقدم وحماية كاملة لبياناتك الشخصية</p>
+                    <h3 className="text-xl font-semibold text-white">تسجيل سهل</h3>
+                    <p className="text-gray-400 mt-1">تسجيل بسيط بدون تعقيدات</p>
                   </div>
                 </div>
               </div>
@@ -280,6 +285,7 @@ export default function RegisterPage() {
                         <Lock className="w-5 h-5 text-purple-400" />
                       </div>
                       <h3 className="text-xl font-semibold text-white">كلمة المرور</h3>
+                      <span className="text-sm text-gray-400">(سياسة بسيطة - 6 أحرف على الأقل)</span>
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -314,9 +320,7 @@ export default function RegisterPage() {
                           </div>
                           <span className={cn(
                             "text-sm font-semibold",
-                            strengthColor === 'red' ? 'text-red-400' :
-                            strengthColor === 'yellow' ? 'text-yellow-400' :
-                            'text-green-400'
+                            strengthColor === 'red' ? 'text-red-400' : 'text-green-400'
                           )}>
                             {strengthText}
                           </span>
@@ -327,15 +331,13 @@ export default function RegisterPage() {
                             <div 
                               className={cn(
                                 "h-full transition-all duration-500",
-                                strengthColor === 'red' ? 'bg-red-500' :
-                                strengthColor === 'yellow' ? 'bg-yellow-500' :
-                                'bg-green-500'
+                                strengthColor === 'red' ? 'bg-red-500' : 'bg-green-500'
                               )}
                               style={{ width: `${strengthPercentage}%` }}
                             />
                           </div>
                           
-                          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                          <div className="grid grid-cols-2 gap-2">
                             {passwordChecks.map((check, index) => (
                               <div 
                                 key={index}
@@ -356,6 +358,29 @@ export default function RegisterPage() {
                             ))}
                           </div>
                         </div>
+
+                        {/* Password Match Check */}
+                        {password && confirmPassword && (
+                          <div className="mt-4 p-3 rounded-lg bg-white/5">
+                            <div className={cn(
+                              "flex items-center gap-2 text-sm",
+                              password === confirmPassword 
+                                ? 'text-green-400' 
+                                : 'text-red-400'
+                            )}>
+                              {password === confirmPassword ? (
+                                <Check className="w-4 h-4" />
+                              ) : (
+                                <X className="w-4 h-4" />
+                              )}
+                              <span>
+                                {password === confirmPassword 
+                                  ? 'كلمات المرور متطابقة' 
+                                  : 'كلمات المرور غير متطابقة'}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -388,7 +413,7 @@ export default function RegisterPage() {
                             "relative flex flex-col items-center p-4 rounded-xl border-2 transition-all duration-300",
                             "transform hover:scale-105 active:scale-95",
                             skillLevel === level.value 
-                              ? `border-white shadow-lg scale-105 bg-gradient-to-br ${getGradientColor(level.value)}` 
+                              ? 'border-white shadow-lg scale-105 bg-gradient-to-br from-orange-500/30 to-orange-600/30' 
                               : 'border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30'
                           )}
                         >

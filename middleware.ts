@@ -1,114 +1,124 @@
 // middleware.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { getToken } from 'next-auth/jwt'
-import {
-  securityHeaders,
-  getClientIp,
-  getUserAgent,
-  checkRateLimit,
-  isSuspiciousRequest,
-  CSRFProtection
-} from '@/lib/auth/security'
-import { auditLog } from '@/lib/auth/logger'
+import { Redis } from '@upstash/redis'
 
-const PUBLIC_PATHS = [
-  '/',
-  '/login',
-  '/register',
-  '/about',
-  '/contact'
-]
+// ✅ استخدام Redis في الإنتاج، و Memory في التطوير
+const rateLimitStore = process.env.UPSTASH_REDIS_URL
+  ? new Redis({
+      url: process.env.UPSTASH_REDIS_URL!,
+      token: process.env.UPSTASH_REDIS_TOKEN!,
+    })
+  : new Map<string, { count: number; timestamp: number }>()
 
-const ROLE_PATHS: Record<string, string[]> = {
-  PLAYER: ['/dashboard/player'],
-  EMPLOYEE: ['/dashboard/employee'],
-  OWNER: ['/dashboard/owner'],
-  ADMIN: ['/dashboard/admin']
+// المسارات العامة
+const PUBLIC_PATHS = ['/', '/login', '/register', '/about', '/contact', '/api/auth/register']
+
+// المسارات اللي محتاجة مصادقة
+const AUTH_PATHS = ['/dashboard', '/api/bookings', '/api/payments']
+
+// إعدادات الـ Rate Limit
+const RATE_LIMITS: Record<string, { windowMs: number; max: number; message: string }> = {
+  '/api/auth/.*': { windowMs: 15 * 60 * 1000, max: 10, message: 'تم تجاوز محاولات تسجيل الدخول' },
+  '/api/fields/.*/slots/.*/lock': { windowMs: 10 * 1000, max: 3, message: 'يمكنك محاولة قفل الموعد 3 مرات كل 10 ثواني' },
+  '/api/bookings': { windowMs: 10 * 1000, max: 5, message: 'يمكنك إنشاء 5 حجوزات كل 10 ثواني' },
+  '/api/payments/.*': { windowMs: 10 * 1000, max: 3, message: 'يمكنك محاولة الدفع 3 مرات كل 10 ثواني' },
+  '/api/.*': { windowMs: 10 * 1000, max: 100, message: 'تم تجاوز الحد المسموح للطلبات' }
 }
 
-export async function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl
-  const ip = getClientIp(req)
-  const userAgent = getUserAgent(req)
+// ✅ دوال مساعدة
+const isPublicPath = (pathname: string) =>
+  PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`))
 
-  // 1️⃣ تجاهل static
-  if (
-    pathname.startsWith('/_next') ||
-    pathname.includes('.') 
-  ) {
+const requiresAuthentication = (pathname: string) => {
+  const isApiPath = pathname.startsWith('/api/') && !pathname.startsWith('/api/auth/')
+  const isDashboardPath = pathname.startsWith('/dashboard')
+  const isExplicitAuthPath = AUTH_PATHS.some(path => pathname.startsWith(path))
+  return isApiPath || isDashboardPath || isExplicitAuthPath
+}
+
+// ✅ Rate Limiting Response
+function rateLimitedResponse(message: string, windowMs: number): NextResponse {
+  const resetTime = Math.ceil((Date.now() + windowMs) / 1000)
+  return new NextResponse(
+    JSON.stringify({ error: 'RATE_LIMITED', message, retryAfter: resetTime }),
+    {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-RateLimit-Limit': '10',
+        'X-RateLimit-Remaining': '0',
+        'X-RateLimit-Reset': resetTime.toString(),
+        'Retry-After': resetTime.toString()
+      }
+    }
+  )
+}
+
+// ✅ Middleware الرئيسي
+export default async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // تجاهل الملفات الداخلية
+  if (isPublicPath(pathname) || pathname.startsWith('/_next') || pathname.includes('.')) {
     return NextResponse.next()
   }
 
-  // 2️⃣ Rate limit
-const rateLimit = await checkRateLimit(ip, 'API')
-  if (!rateLimit.allowed) {
-    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
-  }
+  // تحقق من الـ token
+  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
 
-  // 3️⃣ Suspicious
-  if (isSuspiciousRequest(req)) {
-    auditLog(
-      'SYSTEM',
-      'SUSPICIOUS_REQUEST',
-      'SECURITY',
-      pathname,
-      'Blocked suspicious request',
-      { ip, userAgent },
-      ip,
-      userAgent
-    )
-    return NextResponse.json({ error: 'Blocked' }, { status: 403 })
-  }
-
-  // 4️⃣ Public paths
-  if (PUBLIC_PATHS.includes(pathname)) {
-    const res = NextResponse.next()
-    Object.entries(securityHeaders()).forEach(([k, v]) =>
-      res.headers.set(k, v)
-    )
-    return res
-  }
-
-  // 5️⃣ NextAuth token
-  const token = await getToken({
-    req,
-    secret: process.env.NEXTAUTH_SECRET
-  })
-
-  if (!token) {
-    const loginUrl = new URL('/login', req.url)
+  if (!token && requiresAuthentication(pathname)) {
+    const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirect', pathname)
     return NextResponse.redirect(loginUrl)
   }
 
-  const userRole = token.role as string
-
-  // 6️⃣ Role check
-  const allowedPaths = ROLE_PATHS[userRole] || []
-  const hasAccess = allowedPaths.some(path => pathname.startsWith(path))
-
-  if (!hasAccess) {
-    return NextResponse.redirect(
-      new URL(allowedPaths[0] || '/dashboard', req.url)
-    )
+  if (token?.isActive === false) {
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('error', 'account_inactive')
+    return NextResponse.redirect(loginUrl)
   }
 
-  // 7️⃣ CSRF (بس للـ POST/PUT/DELETE)
-  if (
-    req.method !== 'GET' &&
-    !CSRFProtection.validateRequest(req)
-  ) {
-    return NextResponse.json({ error: 'CSRF failed' }, { status: 403 })
+  // تحقق من الـ role
+  const userRole = token?.role as string
+  if (pathname.startsWith('/dashboard/admin') && userRole !== 'ADMIN') {
+    const dashboardPath = `/dashboard/${userRole?.toLowerCase() || 'user'}`
+    return NextResponse.redirect(new URL(dashboardPath, request.url))
   }
 
-  const res = NextResponse.next()
-  Object.entries(securityHeaders()).forEach(([k, v]) =>
-    res.headers.set(k, v)
-  )
+  // ✅ Rate Limiting
+  const config = Object.entries(RATE_LIMITS).find(([pattern]) =>
+    new RegExp(`^${pattern}$`).test(pathname)
+  )?.[1]
 
-  return res
+  if (config) {
+    const identifier = `${request.ip || 'unknown'}:${pathname}`
+    const key = `ratelimit:${identifier}`
+    const now = Date.now()
+
+    try {
+      if (rateLimitStore instanceof Map) {
+        const entry = rateLimitStore.get(key)
+        if (entry && now - entry.timestamp < config.windowMs) {
+          if (entry.count >= config.max) return rateLimitedResponse(config.message, config.windowMs)
+          entry.count++
+        } else {
+          rateLimitStore.set(key, { count: 1, timestamp: now })
+        }
+      } else {
+        const windowKey = `${key}:${Math.floor(now / config.windowMs)}`
+        const count = await rateLimitStore.incr(windowKey)
+        await rateLimitStore.expire(windowKey, Math.ceil(config.windowMs / 1000) * 2)
+        if (count > config.max) return rateLimitedResponse(config.message, config.windowMs)
+      }
+    } catch (err) {
+      console.error('Rate limiting error:', err)
+    }
+  }
+
+  return NextResponse.next()
 }
 
 export const config = {
-  matcher: ['/((?!_next|favicon.ico).*)']
+  matcher: ['/api/:path*', '/((?!_next/static|_next/image|favicon.ico).*)']
 }

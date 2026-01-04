@@ -1,78 +1,79 @@
 // app/api/fields/[id]/slots/[date]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { parseISO, isValid, startOfDay } from 'date-fns'
-import { generateSlotsForDay } from '@/lib/time-slots/core-logic'
-import { prisma } from '@/lib/prisma' // ✅ تأكد إن عندك import للـ prisma client
+import { generateSlotsForDay } from '@/lib/domain/slots/time-slots/core-logic'  // ✅ المسار الجديد
+import { prisma } from '@/lib/infrastructure/database/prisma'  // ✅ المسار الجديد
+import { SLOT_STATUS } from '@/lib/shared/constants'  // ✅ المسار الجديد
+import { DomainError } from '@/lib/core/errors/domain-errors'  // ✅ المسار الجديد
+import { apiErrorHandler } from '@/lib/shared/api/api-error-handler'  // ✅ المسار الجديد
+import { logger } from '@/lib/shared/logger'  // ✅ استخدام الـ logger الجديد
 
 export async function GET(
-  req: NextRequest,
-  {
-    params
-  }: {
-    params: { id: string; date: string }
-  }
+  request: NextRequest,
+  { params }: { params: { id: string; date: string } }
 ) {
+  const requestId = `get_slots_by_date_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
   try {
     const { id: fieldId, date } = params
 
+    logger.info('Fetching slots by date', { requestId, fieldId, date })
+
     if (!fieldId || !date) {
-      return NextResponse.json(
-        { error: 'Missing field id or date' },
-        { status: 400 }
-      )
+      throw new DomainError('VALIDATION_ERROR', 'معرف الملعب والتاريخ مطلوبان')
     }
 
-    // Expected format: YYYY-MM-DD
     const parsedDate = parseISO(date)
 
     if (!isValid(parsedDate)) {
-      return NextResponse.json(
-        { error: 'Invalid date format. Expected YYYY-MM-DD' },
-        { status: 400 }
-      )
+      throw new DomainError('VALIDATION_ERROR', 'تنسيق التاريخ غير صالح. يجب أن يكون YYYY-MM-DD')
     }
 
     const now = new Date()
 
-    // ✅ تنظيف الـ locks المنتهية قبل أي عرض
     await prisma.slot.updateMany({
       where: {
         fieldId,
-        status: 'TEMP_LOCKED',
+        status: SLOT_STATUS.TEMP_LOCKED,
         lockedUntil: { lt: now }
       },
       data: {
-        status: 'AVAILABLE',
+        status: SLOT_STATUS.AVAILABLE,
         lockedUntil: null,
         lockedByUserId: null
       }
     })
 
-    // ✅ الاستدعاء متوافق مع الـ type الأصلي
     const slots = await generateSlotsForDay({
       fieldId,
       date: startOfDay(parsedDate),
       now
     })
 
-    // ✅ نحول الـ Date objects لـ ISO strings قبل الإرسال
     const normalizedSlots = slots.map(slot => ({
       ...slot,
       startTime: slot.startTime.toISOString(),
       endTime: slot.endTime.toISOString()
     }))
 
-    return NextResponse.json({
-      fieldId,
-      date: parsedDate.toISOString().split('T')[0],
-      slots: normalizedSlots
+    logger.info('Slots by date fetched successfully', { 
+      requestId, 
+      fieldId, 
+      date,
+      slotCount: normalizedSlots.length 
     })
-  } catch (error) {
-    console.error('[FIELDS_SLOTS_API_ERROR]', error)
-
-    return NextResponse.json(
-      { error: 'Failed to load field slots' },
-      { status: 500 }
-    )
+    
+    return NextResponse.json({
+      success: true,
+      data: {
+        fieldId,
+        date: parsedDate.toISOString().split('T')[0],
+        slots: normalizedSlots
+      }
+    })
+    
+  } catch (error: any) {
+    logger.error('Get slots by date error', error, { requestId })
+    return apiErrorHandler(error)
   }
 }

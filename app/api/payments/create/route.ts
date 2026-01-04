@@ -1,107 +1,69 @@
 // app/api/payments/create/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth/next'
-import { prisma } from '@/lib/prisma'
-import { paymob } from '@/lib/paymob'
-import { authOptions } from '@/lib/auth/index'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/infrastructure/auth/auth-options'  // ✅ المسار الجديد
+import { bookingOrchestrator } from '@/lib/application/services/booking-orchestrator'  // ✅ المسار الجديد
+import { apiErrorHandler } from '@/lib/shared/api/api-error-handler'  // ✅ المسار الجديد
+import { logger } from '@/lib/shared/logger'  // ✅ استخدام الـ logger الجديد
 
 export async function POST(request: NextRequest) {
+  const requestId = `create_payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
   try {
-    // ✅ Cast to any لتفادي مشكلة TypeScript
-    const session = (await getServerSession(authOptions)) as any
-    
-    if (!session) {
+    logger.info('Creating payment', { requestId })
+
+    const session = await getServerSession(authOptions)
+    const userId = session?.user?.id
+
+    if (!userId) {
+      logger.warn('Unauthorized payment attempt', { requestId })
       return NextResponse.json(
         { error: 'يجب تسجيل الدخول أولاً' },
         { status: 401 }
       )
     }
 
-    const { bookingId } = await request.json()
+    const { bookingId, amount, currency = 'EGP', idempotencyKey } = await request.json()
 
-    if (!bookingId) {
+    if (!bookingId || !amount) {
+      logger.warn('Incomplete payment data', { requestId, bookingId, amount })
       return NextResponse.json(
-        { error: 'رقم الحجز مطلوب' },
+        { error: 'بيانات الدفع غير مكتملة' },
         { status: 400 }
       )
     }
 
-    // جلب تفاصيل الحجز
-    const booking = await prisma.booking.findUnique({
-      where: { 
-        id: bookingId,
-        userId: session.user.id 
-      },
-      include: {
-        field: true,
-        slot: true,
-        user: true
-      }
-    })
-
-    if (!booking) {
+    if (amount <= 0) {
+      logger.warn('Invalid payment amount', { requestId, amount })
       return NextResponse.json(
-        { error: 'الحجز غير موجود' },
-        { status: 404 }
-      )
-    }
-
-    if (booking.status === 'CONFIRMED') {
-      return NextResponse.json(
-        { error: 'تم دفع هذا الحجز مسبقاً' },
+        { error: 'قيمة الدفع غير صالحة' },
         { status: 400 }
       )
     }
 
-    // إنشاء Order في Paymob
-    const order = await paymob.createOrder({
-      amount: booking.totalAmount,
+    const result = await bookingOrchestrator.initiatePayment({
       bookingId,
-      userId: session.user.id
+      amount,
+      currency,
+      idempotencyKey,
+      userId,
     })
 
-    // بيانات الفاتورة
-    const billingData = {
-      apartment: "NA",
-      email: session.user.email,
-      floor: "NA",
-      first_name: session.user.name?.split(' ')[0] || 'عميل',
-      street: "NA",
-      building: "NA",
-      phone_number: booking.user.phone || "01000000000",
-      shipping_method: "NA",
-      postal_code: "NA",
-      city: "NA",
-      country: "EG",
-      last_name: session.user.name?.split(' ').slice(1).join(' ') || 'كريم',
-      state: "NA"
-    }
-
-    // الحصول على Payment Token
-    const paymentToken = await paymob.getPaymentKey({
-      orderId: order.id,
-      amount: booking.totalAmount,
-      billingData,
-      bookingId
+    logger.info('Payment initiated successfully', {
+      requestId,
+      bookingId,
+      orderId: result.orderId,
+      userId
     })
 
     return NextResponse.json({
-      paymentToken,
-      amount: booking.totalAmount,
-      deposit: booking.field.depositPrice,
-      total: booking.totalAmount,
-      fieldName: booking.field.name,
-      date: booking.slot.startTime,
-      time: new Date(booking.slot.startTime).toLocaleTimeString('ar-EG', {
-        hour: '2-digit',
-        minute: '2-digit'
-      })
+      success: true,
+      data: result,
+      message: 'تم بدء عملية الدفع بنجاح'
     })
-  } catch (error) {
-    console.error('Payment initialization error:', error)
-    return NextResponse.json(
-      { error: 'فشل في تهيئة الدفع' },
-      { status: 500 }
-    )
+
+  } catch (error: any) {
+    logger.error('Payment creation error', error, { requestId })
+    return apiErrorHandler(error)
   }
 }

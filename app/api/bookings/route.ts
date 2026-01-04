@@ -1,129 +1,147 @@
 // app/api/bookings/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth/next'
-import { prisma } from '@/lib/prisma'
-import { authOptions } from '@/lib/auth/auth'
-import { canBookDirectly } from '@/lib/time-slots/core-logic'
-import { checkBookingLimits } from '@/lib/time-slots/booking-limits'
-import { SLOT_STATUS, BOOKING_STATUS, PAYMENT_STATUS } from '@/lib/constants'
+import { getServerSession } from 'next-auth'
+import { prisma } from '@/lib/infrastructure/database/prisma'  // ✅ المسار الجديد
+import { authOptions } from '@/lib/infrastructure/auth/auth-options'  // ✅ المسار الجديد
+import { bookingOrchestrator } from '@/lib/application/services/booking-orchestrator'  // ✅ المسار الجديد
+import { IdempotencyGuard } from '@/lib/application/idempotency/idempotency-guard'  // ✅ المسار الجديد
+import { DomainError } from '@/lib/core/errors/domain-errors'  // ✅ المسار الجديد
+import { apiErrorHandler } from '@/lib/shared/api/api-error-handler'  // ✅ المسار الجديد
+import { 
+  BOOKING_STATUS 
+} from '@/lib/shared/constants'  // ✅ المسار الجديد
+import { logger } from '@/lib/shared/logger'  // ✅ استخدام الـ logger الجديد
 
-// دالة لتطبيع الحالات القديمة عشان تمنع أخطاء المقارنة
-function normalizeSlotStatus(status: string) {
-  if (status === 'AVAILABLE_NEEDS_CONFIRM' || status === 'PENDING_CONFIRMATION') {
-    return SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
-  }
-  return status
-}
-
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const requestId = `get_bookings_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
   try {
+    logger.info('Fetching bookings', { requestId })
+    
     const session = await getServerSession(authOptions)
+    const userId = session?.user?.id
 
-    // نعمل type cast عشان نتجنب خطأ "unknown"
-    const userId = (session as any)?.user?.id
     if (!userId) {
-      return NextResponse.json({ error: 'غير مصرح' }, { status: 401 })
+      logger.warn('Unauthorized access to bookings', { requestId })
+      throw new DomainError('UNAUTHORIZED')
     }
 
-    const bookings = await prisma.booking.findMany({
-      where: {
-        userId,
-        slot: {
-          startTime: { gte: new Date() }
-        }
-      },
-      include: { field: true, slot: true },
-      orderBy: { slot: { startTime: 'asc' } }
+    const { searchParams } = new URL(request.url)
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = Math.min(parseInt(searchParams.get('limit') || '20'), 50)
+    const status = searchParams.get('status')
+    const skip = (page - 1) * limit
+
+    const where: any = { userId }
+    
+    if (status) {
+      where.status = status
+    } else {
+      where.status = {
+        in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.PENDING_PAYMENT]
+      }
+    }
+
+    const [bookings, total] = await Promise.all([
+      prisma.booking.findMany({
+        where,
+        include: {
+          field: {
+            select: {
+              id: true,
+              name: true,
+              pricePerHour: true
+            }
+          },
+          slot: {
+            select: {
+              id: true,
+              startTime: true,
+              endTime: true,
+              durationMinutes: true
+            }
+          },
+          payments: {
+            take: 1,
+            orderBy: { createdAt: 'desc' }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit
+      }),
+      prisma.booking.count({ where })
+    ])
+
+    logger.info('Bookings fetched successfully', { 
+      requestId, 
+      userId, 
+      count: bookings.length,
+      total 
+    })
+    
+    return NextResponse.json({
+      success: true,
+      data: bookings,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasMore: page * limit < total
+      }
     })
 
-    return NextResponse.json({ bookings })
-  } catch (error) {
-    console.error('Error fetching bookings:', error)
-    return NextResponse.json({ error: 'فشل في جلب الحجوزات' }, { status: 500 })
+  } catch (error: any) {
+    logger.error('Get bookings error', error, { requestId })
+    return apiErrorHandler(error)
   }
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = `create_booking_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
   try {
+    logger.info('Creating booking', { requestId })
+    
     const session = await getServerSession(authOptions)
+    const userId = session?.user?.id
 
-    const userId = (session as any)?.user?.id
     if (!userId) {
-      return NextResponse.json({ error: 'يجب تسجيل الدخول أولاً' }, { status: 401 })
+      logger.warn('Unauthorized booking creation attempt', { requestId })
+      throw new DomainError('UNAUTHORIZED')
     }
 
-    const { slotId, fieldId, startTime } = await request.json()
+    const { slotId, fieldId, idempotencyKey } = await request.json()
 
-    if (!slotId || !fieldId || !startTime) {
-      return NextResponse.json({ error: 'بيانات الحجز غير مكتملة' }, { status: 400 })
+    if (!slotId || !fieldId) {
+      logger.warn('Incomplete booking data', { requestId, slotId, fieldId })
+      throw new DomainError('VALIDATION_ERROR', 'بيانات الحجز غير مكتملة')
     }
 
-    await checkBookingLimits({
+    const finalKey = idempotencyKey || IdempotencyGuard.generateKey('booking')
+
+    const result = await bookingOrchestrator.createBooking({
       userId,
-      slotDate: new Date(startTime)
+      slotId,
+      fieldId,
+      idempotencyKey: finalKey
     })
 
-    const slot = await prisma.slot.findUnique({
-      where: { id: slotId },
-      include: { field: true }
+    logger.info('Booking created successfully', { 
+      requestId, 
+      bookingId: result.bookingId,
+      userId 
     })
-
-    if (!slot || slot.fieldId !== fieldId) {
-      return NextResponse.json({ error: 'الموعد غير صالح' }, { status: 404 })
-    }
-
-    const normalizedStatus = normalizeSlotStatus(slot.status)
-
-    if (
-      normalizedStatus !== SLOT_STATUS.AVAILABLE &&
-      normalizedStatus !== SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
-    ) {
-      return NextResponse.json({ error: 'الموعد غير متاح للحجز' }, { status: 400 })
-    }
-
-    const needsConfirmation = !canBookDirectly(new Date(startTime))
-
-    const bookingStatus = needsConfirmation
-      ? BOOKING_STATUS.PENDING_CONFIRMATION
-      : BOOKING_STATUS.CONFIRMED
-
-    const newSlotStatus = needsConfirmation
-      ? SLOT_STATUS.AVAILABLE_NEEDS_CONFIRM
-      : SLOT_STATUS.BOOKED
-
-    const booking = await prisma.$transaction(async (tx) => {
-      await tx.slot.update({
-        where: { id: slotId },
-        data: { status: newSlotStatus as any }
-      })
-
-      return tx.booking.create({
-        data: {
-          userId,
-          fieldId,
-          slotId,
-          status: bookingStatus as any,
-          paymentStatus: PAYMENT_STATUS.PENDING,
-          totalAmount: slot.field.pricePerHour,
-          depositPaid: 0,
-          refundableUntil: new Date(Date.now() + 24 * 60 * 60 * 1000)
-        },
-        include: { field: true, slot: true }
-      })
-    })
-
+    
     return NextResponse.json({
-      booking,
-      needsPayment: !needsConfirmation,
-      message: needsConfirmation
-        ? 'تم إرسال طلب الحجز وسيتم تأكيده من قبل الموظف'
-        : 'تم حجز الموعد بنجاح، يرجى إتمام الدفع'
+      success: true,
+      ...result,
+      idempotencyKey: finalKey
     })
+
   } catch (error: any) {
-    console.error('Error creating booking:', error)
-    return NextResponse.json(
-      { error: error.message || 'فشل في إنشاء الحجز' },
-      { status: 500 }
-    )
+    logger.error('Create booking error', error, { requestId })
+    return apiErrorHandler(error)
   }
 }
